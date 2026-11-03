@@ -61,7 +61,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .pl{border:1.5px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 0;font-weight:800;font-size:16px}
 .pl.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .files{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.pick{position:relative;border:1.5px dashed var(--line);border-radius:12px;padding:12px 8px;text-align:center;background:var(--bg)}
+.pick{display:block;position:relative;border:1.5px dashed var(--line);border-radius:12px;padding:12px 8px;text-align:center;background:var(--bg)}
 .pick b{display:block;font-size:14px}
 .pick span{display:block;font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pick.done{border-style:solid;border-color:var(--ok)}
@@ -75,6 +75,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .btn.ghost{background:var(--chip);color:var(--ink)}
 .btn + .btn{margin-top:8px}
 .row2{display:flex;gap:8px}.row2 .btn{margin-top:0}
+.arc{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%;border:1px solid var(--line);
+  background:var(--bg);border-radius:10px;padding:11px 12px;margin-top:6px;text-align:start}
+.arc span{color:var(--muted);font-size:13px}
 .preview{margin-top:12px;border:1px solid var(--line);border-radius:12px;overflow:auto;background:#fff}
 .preview img{display:block;width:100%;height:auto}
 .kv{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:4px 0}
@@ -185,8 +188,7 @@ button{font:inherit;color:inherit;cursor:pointer}
       <button class="btn ghost" id="copyBtn">📋 Copy</button>
     </div>
     <div class="preview hidden" id="preview"><img id="previewImg" alt="Report"></div>
-    <label class="pick" style="margin-top:10px"><b>📊 Update the Excel file</b><span id="xlName">Pick this month's Productivity Excel, you get it back filled in</span>
-      <input type="file" id="xlFile" accept=".xlsx"></label>
+    <button class="btn ghost" id="xlBtn" style="margin-top:10px">📊 Download Excel</button>
   </div>
 </div>
 
@@ -210,6 +212,11 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div class="field"><label for="nTrucks">Trucks (fleet)</label><input id="nTrucks" class="num" type="number" inputmode="numeric"></div>
     <div class="field"><label for="nPlants">Plants (fleet)</label><input id="nPlants" class="num" type="number" inputmode="numeric"></div>
     <div class="field"><label for="nPumps">Pumps (fleet)</label><input id="nPumps" class="num" type="number" inputmode="numeric"></div>
+  </div>
+  <div class="box">
+    <h3>🗂️ Archive</h3>
+    <p class="hint">Every month saved on this device or online. Tap one to open it, then Share its report or Download its Excel.</p>
+    <div id="archive"></div>
   </div>
   <div class="box">
     <h3>Bring in the Excel sheet</h3>
@@ -415,6 +422,7 @@ document.querySelectorAll('.pl').forEach(b => b.onclick = () => {
 });
 function openSettings() {
   $('#main').classList.add('hidden'); $('#dateBar').classList.add('hidden'); $('#settings').classList.remove('hidden');
+  renderArchive();
   if (!SY) {
     $('#syncHint').textContent = 'Checking…';
     api({a: 'info'}).then(j => $('#syncHint').textContent = j.setup
@@ -589,9 +597,11 @@ $('#impFile').onchange = async e => {
 const JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
 const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
 const colNum = ref => ref.replace(/\d+/g, '').split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
-async function fillExcel(buf) {
+const xml = s => new DOMParser().parseFromString(s, 'application/xml');
+// the "Trucks & Plants" sheet inside an .xlsx: its workbook.xml, its path in the zip and its parsed XML
+async function openSheet(buf) {
   if (!window.JSZip) await loadScript(JSZIP);
-  const zip = await JSZip.loadAsync(buf), xml = s => new DOMParser().parseFromString(s, 'application/xml');
+  const zip = await JSZip.loadAsync(buf);
   const wbx = xml(await zip.file('xl/workbook.xml').async('string'));
   const rels = xml(await zip.file('xl/_rels/workbook.xml.rels').async('string'));
   const sh = [...wbx.getElementsByTagNameNS(NS, 'sheet')].find(s => s.getAttribute('name') === 'Trucks & Plants')
@@ -599,7 +609,20 @@ async function fillExcel(buf) {
   const rid = sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
   const target = [...rels.getElementsByTagName('Relationship')].find(r => r.getAttribute('Id') === rid).getAttribute('Target');
   const path = target.startsWith('/') ? target.slice(1) : 'xl/' + target.replace(/^\.\//, '');
-  const doc = xml(await zip.file(path).async('string')), data = doc.getElementsByTagNameNS(NS, 'sheetData')[0];
+  return {zip, wbx, path, doc: xml(await zip.file(path).async('string'))};
+}
+// ask Excel to recalculate every formula when it opens, then pack the zip again
+async function packSheet({zip, wbx, path, doc}) {
+  let calc = wbx.getElementsByTagNameNS(NS, 'calcPr')[0];
+  if (!calc) { calc = wbx.createElementNS(NS, 'calcPr'); wbx.documentElement.appendChild(calc); }
+  calc.setAttribute('fullCalcOnLoad', '1');
+  const ser = d => new XMLSerializer().serializeToString(d);
+  zip.file(path, ser(doc), {createFolders: false}); zip.file('xl/workbook.xml', ser(wbx), {createFolders: false});
+  return zip.generateAsync({type: 'blob', compression: 'DEFLATE',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+}
+async function fillExcel(buf) {
+  const sheet = await openSheet(buf), {zip, doc} = sheet, data = doc.getElementsByTagNameNS(NS, 'sheetData')[0];
   // cells covered by a merge (not its top-left) are never written
   const hidden = new Set();
   for (const mc of doc.getElementsByTagNameNS(NS, 'mergeCell')) {
@@ -682,27 +705,129 @@ async function fillExcel(buf) {
   }
   MATERIALS.forEach(([k], i) => put('J' + (41 + i), num(M.stock[k])));
   put('X5', num(M.fuel));
-  // ask Excel to recalculate every formula when the file opens
-  let calc = wbx.getElementsByTagNameNS(NS, 'calcPr')[0];
-  if (!calc) { calc = wbx.createElementNS(NS, 'calcPr'); wbx.documentElement.appendChild(calc); }
-  calc.setAttribute('fullCalcOnLoad', '1');
-  const ser = d => new XMLSerializer().serializeToString(d);
-  zip.file(path, ser(doc), {createFolders: false}); zip.file('xl/workbook.xml', ser(wbx), {createFolders: false});
-  return {days, matched, blob: await zip.generateAsync({type: 'blob', compression: 'DEFLATE',
-    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})};
+  return {days, matched, blob: await packSheet(sheet)};
+}
+
+/* ---------- a month's empty sheet from template.xlsx ----------
+   Dates set to the month, the days' typed values emptied (formulas kept), comment cells back to their
+   plain look and unmerged, only the 1st shown (the sheet unhides one day at a time), fuel emptied, and
+   the YTD formula starting from the month's base. */
+const monthName = mk => new Date(mk + '-01T00:00').toLocaleDateString('en-GB', {month: 'long', year: 'numeric'});
+const daySerial = d => Math.round((Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.slice(8, 10)) - Date.UTC(1899, 11, 30)) / 864e5);
+async function newMonthExcel(buf, next, base) {
+  const sheet = await openSheet(buf), {doc} = sheet, data = doc.getElementsByTagNameNS(NS, 'sheetData')[0];
+  const rowOf = r => [...data.getElementsByTagNameNS(NS, 'row')].find(x => +x.getAttribute('r') === r);
+  const cellOf = ref => {
+    const row = rowOf(+ref.match(/\d+/)[0]); if (!row) return null;
+    const cells = [...row.getElementsByTagNameNS(NS, 'c')];
+    let c = cells.find(x => x.getAttribute('r') === ref);
+    if (!c) { c = doc.createElementNS(NS, 'c'); c.setAttribute('r', ref); row.insertBefore(c, cells.find(x => colNum(x.getAttribute('r')) > colNum(ref)) || null); }
+    return c;
+  };
+  const isFormula = c => c.getElementsByTagNameNS(NS, 'f').length > 0;
+  const empty = c => { if (!c || isFormula(c)) return; while (c.firstChild) c.removeChild(c.firstChild); c.removeAttribute('t'); };
+  const setV = (c, text, t) => { if (!c || isFormula(c)) return; empty(c); if (t) c.setAttribute('t', t);
+    const v = doc.createElementNS(NS, 'v'); v.textContent = text; c.appendChild(v); };
+  // the comment cells' plain look = the style most empty middle-row comment cells have
+  const count = {};
+  for (let r = FIRST_XL_ROW + 1; r < LAST_XL_ROW; r++) { const c = cellOf('T' + r);
+    if (c && !c.firstChild) count[c.getAttribute('s')] = (count[c.getAttribute('s')] || 0) + 1; }
+  const plainT = Object.entries(count).sort((a, b) => b[1] - a[1])[0]?.[0];
+  // colours put on by hand last month (a red V5 on a stopped day…): every day cell gets back its
+  // column's usual fill, keeping its own borders and number format
+  const stylesFile = sheet.zip.file('xl/styles.xml'), sty = stylesFile && xml(await stylesFile.async('string'));
+  const xfs = sty && sty.getElementsByTagNameNS(NS, 'cellXfs')[0], xfList = xfs ? [...xfs.getElementsByTagNameNS(NS, 'xf')] : [];
+  const fillOf = s => xfList[+s || 0] ? xfList[+s || 0].getAttribute('fillId') || '0' : '0';
+  const withFill = {}, restyle = (c, fill) => {
+    const s = c.getAttribute('s') || '0'; if (fillOf(s) === fill) return;
+    const k = s + '|' + fill;
+    if (!(k in withFill)) { const x = xfList[+s].cloneNode(true); x.setAttribute('fillId', fill); x.setAttribute('applyFill', '1');
+      xfs.appendChild(x); xfList.push(x); withFill[k] = xfList.length - 1; xfs.setAttribute('count', xfList.length); }
+    c.setAttribute('s', withFill[k]);
+  };
+  if (xfs) for (let col = colNum('B'); col <= colNum('S'); col++) {
+    const L = String.fromCharCode(64 + col), fills = {};
+    for (let r = FIRST_XL_ROW + 1; r < LAST_XL_ROW; r++) { const c = cellOf(L + r); if (c) { const f = fillOf(c.getAttribute('s')); fills[f] = (fills[f] || 0) + 1; } }
+    const usual = Object.entries(fills).sort((a, b) => b[1] - a[1])[0]?.[0];
+    if (usual != null) for (let r = FIRST_XL_ROW; r <= LAST_XL_ROW; r++) { const c = cellOf(L + r); if (c) restyle(c, usual); }
+  }
+  if (xfs) sheet.zip.file('xl/styles.xml', new XMLSerializer().serializeToString(sty), {createFolders: false});
+  const n = daysIn(next);
+  for (let r = FIRST_XL_ROW; r <= LAST_XL_ROW; r++) {
+    const day = r - FIRST_XL_ROW + 1;
+    if (day <= n) setV(cellOf('B' + r), String(daySerial(next + '-' + pad(day)))); else empty(cellOf('B' + r));
+    for (const col of ['C', 'I', 'Q', 'R', 'T']) empty(cellOf(col + r));
+    for (const col of 'DEFGH') setV(cellOf(col + r), '0', 'b');
+    if (plainT && r > FIRST_XL_ROW && r < LAST_XL_ROW) cellOf('T' + r).setAttribute('s', plainT);
+    const row = rowOf(r); if (row) { if (r === FIRST_XL_ROW) row.removeAttribute('hidden'); else row.setAttribute('hidden', '1'); }
+  }
+  // comment merges belonged to last month's days
+  const mcs = doc.getElementsByTagNameNS(NS, 'mergeCells')[0];
+  if (mcs) {
+    for (const mc of [...mcs.getElementsByTagNameNS(NS, 'mergeCell')]) {
+      const [a, b] = mc.getAttribute('ref').split(':');
+      if (a.startsWith('T') && b && b.startsWith('T') && +a.slice(1) >= FIRST_XL_ROW && +b.slice(1) <= LAST_XL_ROW) mcs.removeChild(mc);
+    }
+    const left = mcs.getElementsByTagNameNS(NS, 'mergeCell').length;
+    if (left) mcs.setAttribute('count', left); else mcs.parentNode.removeChild(mcs);
+  }
+  empty(cellOf('X5'));
+  const p2 = cellOf('P2'), f = p2 && p2.getElementsByTagNameNS(NS, 'f')[0];
+  if (f) { f.textContent = f.textContent.replace(/^\s*[\d.]+\s*\+/, base + '+');
+    const v = p2.getElementsByTagNameNS(NS, 'v')[0]; if (v) p2.removeChild(v); }
+  return packSheet(sheet);
+}
+
+/* ---------- archive: every month on this device, plus the ones only online ---------- */
+async function renderArchive() {
+  const months = {};
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const mk = (/^dp-(\d{4}-\d{2})$/.exec(localStorage.key(i)) || [])[1]; if (!mk) continue;
+      const m = store.get('dp-' + mk) || {};
+      months[mk] = {days: Object.values(m.days || {}).filter(r => r.prod != null).length, prod: mtd({days: m.days || {}})};
+    }
+  } catch {}
+  const draw = () => {
+    const keys = Object.keys(months).filter(k => months[k].days || months[k].online).sort().reverse();
+    $('#archive').innerHTML = keys.length ? keys.map(mk => `<button class="arc" data-m="${mk}"><b>${monthName(mk)}</b>
+      <span>${months[mk].days ? months[mk].days + ' days · ' + fmt(months[mk].prod) + ' m³' : months[mk].online + ' days online'}</span></button>`).join('')
+      : '<p class="hint" style="margin:0">Nothing saved yet.</p>';
+    $('#archive').querySelectorAll('.arc').forEach(b => b.onclick = () => {
+      const mk = b.dataset.m, m = monthData(mk) || {}, filled = Object.keys(m.days || {}).filter(d => m.days[d].prod != null).sort();
+      const end = mk + '-' + pad(daysIn(mk)), today = iso(new Date());
+      setDay(filled.length ? filled[filled.length - 1] : end < today ? end : iso(new Date(Date.now() - 864e5)));
+      $('#backBtn').click(); window.scrollTo(0, 0);
+    });
+  };
+  draw();
+  if (SY) try { const j = await api({a: 'list', tok: SY.tok});
+    for (const [mk, cnt] of Object.entries(j.months || {})) if (!months[mk] || !months[mk].days) months[mk] = {days: 0, online: cnt};
+    draw(); } catch {}
 }
 const FIRST_XL_ROW = 6, LAST_XL_ROW = 36;
-$('#xlFile').onchange = async e => {
-  const f = e.target.files[0]; if (!f) return;
-  $('#xlName').textContent = 'Filling…';
+/* Download Excel: template.xlsx (the user's sheet with no numbers) → this month's dates and YTD → the
+   month's days filled in → saved where the user picks (Save As on a computer, a normal download on a phone). */
+$('#xlBtn').onclick = async () => {
+  const mk = monthKey(DAY), name = `Productivity ${monthName(mk)}.xlsx`;
+  if (M.ytdBase == null) { toast('Set "YTD before this month" in ⚙ first', 3500); return openSettings(); }
+  // ask where to save first: the browser only allows the Save As window right after the tap
+  let handle = null;
+  if (window.showSaveFilePicker) {
+    try { handle = await showSaveFilePicker({suggestedName: name,
+      types: [{description: 'Excel', accept: {'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx']}}]}); }
+    catch (err) { if (err.name === 'AbortError') return; }
+  }
+  const b = $('#xlBtn'), old = b.textContent; b.disabled = true; b.textContent = 'Making the Excel…';
   try {
-    const {days, matched, blob} = await fillExcel(await f.arrayBuffer());
-    if (!matched) throw new Error('That file has no filled day of ' + monthKey(DAY) + ' from this app');
-    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = f.name; a.click();
-    $('#xlName').textContent = `${f.name} · ${days ? days + ' day(s) updated' : 'already up to date'}`;
-    toast('Excel ready in Downloads: save it over the old one', 3500);
-  } catch (err) { $('#xlName').textContent = 'Could not fill it'; toast(err.message, 3500); }
-  e.target.value = '';
+    const tpl = await (await fetch('template.xlsx')).arrayBuffer();
+    const fresh = await newMonthExcel(tpl, mk, M.ytdBase);
+    const {blob} = await fillExcel(await fresh.arrayBuffer());
+    if (handle) { const w = await handle.createWritable(); await w.write(blob); await w.close(); toast('Saved: ' + handle.name, 3000); }
+    else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click();
+      toast(name + ' is in Downloads', 3000); }
+  } catch (err) { toast('Could not make the Excel: ' + err.message, 3500); }
+  b.disabled = false; b.textContent = old;
 };
 
 /* ---------- the report image (same layout as the Excel sheet) ---------- */
