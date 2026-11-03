@@ -36,6 +36,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .title small{color:var(--muted);font-size:12px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .gear{flex:none;width:40px;height:40px;display:grid;place-items:center;border:0;background:none;color:var(--muted);border-radius:10px;padding:0}
 .gear:active{background:var(--chip)}
+.gear.sync{font-size:21px}
+.gear.sync[data-s=ok]{color:var(--ok)} .gear.sync[data-s=off],.gear.sync[data-s=err]{color:var(--bad)}
+.gear.sync[data-s=busy]{color:var(--accent)} .gear.sync[data-s=none]{opacity:.45}
 .datebar{display:flex;align-items:center;gap:6px;margin-top:8px}
 .datebar input{flex:1;min-width:0;font:inherit;font-size:17px;font-weight:700;padding:8px 10px;border-radius:10px;
   border:1.5px solid var(--line);background:var(--card);color:var(--ink);outline:none}
@@ -114,6 +117,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 <body>
 <div class="top"><div class="wrap">
   <div class="title"><h1><img src="logo.png" alt="NCM">Daily Productivity</h1><small id="monthLbl"></small>
+    <button class="gear sync" id="syncBtn" aria-label="Online save" data-s="none">☁</button>
     <button class="gear" id="gearBtn" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"
       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/>
       <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
@@ -126,6 +130,11 @@ button{font:inherit;color:inherit;cursor:pointer}
 </div></div>
 
 <div class="wrap" id="main">
+  <div class="box hidden" id="syncBanner">
+    <h3>☁ Save online</h3>
+    <p class="hint">This device keeps the month only for itself. Connect it with your password so every device sees the same days, and nothing is lost if the phone is cleared.</p>
+    <button class="btn" id="syncSetup">Set up</button>
+  </div>
   <div class="box">
     <h3>📝 Day's work <span class="st" id="dayState"></span></h3>
     <div class="field"><label for="trucks">Working trucks</label>
@@ -170,14 +179,30 @@ button{font:inherit;color:inherit;cursor:pointer}
 
   <div class="box">
     <h3>📤 Report</h3>
-    <button class="btn" id="shareBtn">Share report image</button>
+    <div class="row2">
+      <button class="btn ghost" id="openBtn">🖼️ Open</button>
+      <button class="btn" id="shareBtn">📤 Share</button>
+      <button class="btn ghost" id="copyBtn">📋 Copy</button>
+    </div>
     <div class="preview hidden" id="preview"><img id="previewImg" alt="Report"></div>
+    <label class="pick" style="margin-top:10px"><b>📊 Update the Excel file</b><span id="xlName">Pick this month's Productivity Excel, you get it back filled in</span>
+      <input type="file" id="xlFile" accept=".xlsx"></label>
   </div>
 </div>
 
 <div class="wrap hidden" id="settings">
   <button class="back" id="backBtn">‹ Back</button>
   <div class="set"><h2>Settings</h2></div>
+  <div class="box">
+    <h3>☁ Online save <span class="st" id="syncSt"></span></h3>
+    <p class="hint" id="syncHint"></p>
+    <div id="syncForm">
+      <div class="field"><label for="syncPw">Password</label>
+        <input id="syncPw" type="password" autocomplete="current-password" style="font-size:17px"></div>
+      <button class="btn" id="syncGo">Connect</button>
+    </div>
+    <button class="btn ghost hidden" id="syncOff">Disconnect this device</button>
+  </div>
   <div class="box">
     <h3>This month</h3>
     <div class="field"><label for="ytdBase">YTD before this month</label>
@@ -230,7 +255,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { toast('Could not save on this phone'); } }
 };
 // In the morning you report yesterday's work, so the app opens on yesterday
-let DAY = iso(new Date(Date.now() - 864e5)), M = null;
+let DAY = iso(new Date(Date.now() - 864e5)), M = null, PULL = null;
 function loadMonth(mk) {
   let m = store.get('dp-' + mk);
   if (!m) {
@@ -242,14 +267,108 @@ function loadMonth(mk) {
   return m;
 }
 const save = () => store.set('dp-' + monthKey(DAY), M);
+
+/* ---------- online save ----------
+   Each day ("d|2026-11-02") and each month's settings ("m|2026-11": stock, fuel, YTD, fleet) is one record
+   on the user's Apps Script (sync-backend/Code.gs), encrypted here with a key from the password; the newest
+   change (t) wins. This device keeps only the key and a token derived from the password, never the password. */
+const SYNC_URL = 'https://script.google.com/macros/s/AKfycbzF1Xr5-tuCwplLyHOIbmexW88Qco1KwGCz-hjQ_FXi8u5ugYQFGL1Da3GfBUze_u_MHg/exec';
+const META_KEYS = ['stock', 'fuel', 'ytdBase', 'nTrucks', 'nPlants', 'nPumps'];
+const enc = new TextEncoder(), dec = new TextDecoder();
+const b64 = u => btoa(String.fromCharCode(...u)), unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+let SY = store.get('dp-sync'), AES = null;
+const dirty = new Set(store.get('dp-dirty') || []);
+async function aes() { return AES || (AES = await crypto.subtle.importKey('raw', unb64(SY.key), 'AES-GCM', false, ['encrypt', 'decrypt'])); }
+async function seal(obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({name: 'AES-GCM', iv}, await aes(), enc.encode(JSON.stringify(obj))));
+  const all = new Uint8Array(12 + ct.length); all.set(iv); all.set(ct, 12); return b64(all);
+}
+async function unseal(c) {
+  const all = unb64(c);
+  return JSON.parse(dec.decode(await crypto.subtle.decrypt({name: 'AES-GCM', iv: all.slice(0, 12)}, await aes(), all.slice(12))));
+}
+async function api(body) {
+  const res = await fetch(SYNC_URL, {method: 'POST', body: JSON.stringify(body)});   // text/plain: no CORS preflight
+  const j = await res.json();
+  if (!j.ok) throw Object.assign(new Error(j.err || 'error'), {code: j.err});
+  return j;
+}
+function syncState(s, msg) {
+  $('#syncBtn').dataset.s = s; $('#syncBtn').title = msg || '';
+  $('#syncSt').textContent = msg || ''; $('#syncSt').className = 'st ' + (s === 'ok' ? 'ok' : s === 'off' || s === 'err' ? 'bad' : '');
+  $('#syncBanner').classList.toggle('hidden', !!SY);
+  $('#syncForm').classList.toggle('hidden', !!SY); $('#syncOff').classList.toggle('hidden', !SY);
+}
+function syncFail(err) {
+  if (err.code === 'auth' || err.code === 'nosetup') {
+    SY = null; AES = null; try { localStorage.removeItem('dp-sync'); } catch {}
+    syncState('err', 'Password changed: connect again');
+  } else syncState('off', 'Offline: saved on this device, goes online later');
+}
+const monthData = mk => M && M._mk === mk ? M : store.get('dp-' + mk);
+const recOf = k => { const m = monthData(k.slice(2, 9)); if (!m) return null;
+  return k[0] === 'd' ? (m.days || {})[k.slice(2)] : {...Object.fromEntries(META_KEYS.map(x => [x, m[x]])), t: m.t}; };
+function queue(k) { dirty.add(k); store.set('dp-dirty', [...dirty]); clearTimeout(queue.h); queue.h = setTimeout(push, 1500); }
+function touchDay(d) { dayRec(d).t = Date.now(); queue('d|' + d); }
+function touchMeta() { M.t = Date.now(); queue('m|' + monthKey(DAY)); }
+async function push() {
+  if (!SY || !dirty.size || push.busy) return;
+  push.busy = true; syncState('busy', 'Saving…');
+  try {
+    const w = [];
+    for (const k of dirty) { const r = recOf(k); if (r && r.t) w.push({k, v: {t: r.t, c: await seal(r)}}); else dirty.delete(k); }
+    if (w.length) await api({a: 'put', tok: SY.tok, w});
+    for (const x of w) { const r = recOf(x.k); if (!r || r.t === x.v.t) dirty.delete(x.k); }   // changed again meanwhile: keep it
+    store.set('dp-dirty', [...dirty]);
+    syncState('ok', 'Saved online · ' + new Date().toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}));
+  } catch (err) { syncFail(err); }
+  push.busy = false;
+  if (SY && dirty.size) { clearTimeout(queue.h); queue.h = setTimeout(push, 20000); }
+}
+async function pull() {
+  if (!SY || !M) return;
+  const mk = M._mk; syncState('busy', 'Loading…');
+  try {
+    const j = await api({a: 'get', tok: SY.tok, m: mk}), days = j.days || {};
+    if (!M || M._mk !== mk) return;
+    let changed = false;
+    for (const [d, v] of Object.entries(days)) {
+      const loc = M.days[d];
+      if (!loc || !loc.t || v.t > loc.t) { M.days[d] = await unseal(v.c); changed = true; }
+    }
+    if (j.meta && (!M.t || j.meta.t > M.t)) { Object.assign(M, await unseal(j.meta.c)); changed = true; }
+    // what this device has and the server does not (typed before connecting) goes up
+    for (const [d, r] of Object.entries(M.days)) {
+      if (!days[d] || (r.t || 0) > days[d].t) { r.t = r.t || Date.now(); queue('d|' + d); }
+    }
+    const hasMeta = M.fuel != null || M.ytdBase != null || Object.keys(M.stock || {}).length;
+    if (hasMeta && (!j.meta || (M.t || 0) > j.meta.t)) { M.t = M.t || Date.now(); queue('m|' + mk); }
+    save();
+    if (changed) render(true);
+    syncState('ok', 'Saved online');
+  } catch (err) { syncFail(err); }
+}
+async function connect(pw) {
+  const base = await crypto.subtle.importKey('raw', enc.encode(pw), 'PBKDF2', false, ['deriveBits']);
+  const bits = new Uint8Array(await crypto.subtle.deriveBits(
+    {name: 'PBKDF2', salt: enc.encode('ncm-daily-productivity'), iterations: 200000, hash: 'SHA-256'}, base, 512));
+  const cand = {key: b64(bits.slice(0, 32)), tok: [...bits.slice(32)].map(x => x.toString(16).padStart(2, '0')).join('')};
+  const j = await api({a: 'setup', tok: cand.tok});
+  SY = cand; AES = null; store.set('dp-sync', SY);
+  return j.first;
+}
 const dayRec = d => M.days[d] || (M.days[d] = {});
 const mtd = m => Object.values(m.days).reduce((s, r) => s + (num(r.prod) || 0), 0);
 
 /* ---------- form ---------- */
 $('#plants').innerHTML = PLANTS.map((p, i) => `<button class="pl" data-p="${i}">${p}</button>`).join('');
-function render() {
+function render(fromPull) {
   const mk = monthKey(DAY);
-  if (!M || M._mk !== mk) { M = loadMonth(mk); Object.defineProperty(M, '_mk', {value: mk, enumerable: false}); }
+  if (!M || M._mk !== mk) {
+    M = loadMonth(mk); Object.defineProperty(M, '_mk', {value: mk, enumerable: false});
+    if (SY && !fromPull) PULL = pull();
+  }
   $('#day').value = DAY;
   $('#monthLbl').textContent = new Date(DAY + 'T00:00').toLocaleDateString('en-GB', {weekday: 'long'});
   const r = M.days[DAY] || {};
@@ -273,26 +392,62 @@ function setDay(d) { DAY = d; render(); }
 $('#day').onchange = e => e.target.value && setDay(e.target.value);
 const shift = n => { const d = new Date(DAY + 'T00:00'); d.setDate(d.getDate() + n); setDay(iso(d)); };
 $('#prevDay').onclick = () => shift(-1); $('#nextDay').onclick = () => shift(1);
-const onNum = (id, fn) => $(id).addEventListener('input', e => { fn(num(e.target.value)); save(); $('#preview').classList.add('hidden'); });
+// meta = a month setting (stock, fuel, YTD, fleet) rather than the selected day
+const onNum = (id, fn, meta) => $(id).addEventListener('input', e => {
+  fn(num(e.target.value)); meta ? touchMeta() : touchDay(DAY); save(); $('#preview').classList.add('hidden');
+});
 onNum('#trucks', v => dayRec(DAY).trucks = v);
 onNum('#prod', v => dayRec(DAY).prod = v);
 onNum('#pumpQty', v => dayRec(DAY).pump = v);
 onNum('#pumpCnt', v => dayRec(DAY).pumps = v);
-onNum('#fuel', v => M.fuel = v);
-onNum('#ytdBase', v => M.ytdBase = v);
-for (const k of ['nTrucks', 'nPlants', 'nPumps']) onNum('#' + k, v => M[k] = v || DEFAULTS[k]);
-for (const [k] of MATERIALS) onNum('#s_' + k, v => M.stock[k] = v);
-$('#comment').addEventListener('input', e => { dayRec(DAY).comment = e.target.value; save(); });
+onNum('#fuel', v => M.fuel = v, true);
+onNum('#ytdBase', v => M.ytdBase = v, true);
+for (const k of ['nTrucks', 'nPlants', 'nPumps']) onNum('#' + k, v => M[k] = v || DEFAULTS[k], true);
+for (const [k] of MATERIALS) onNum('#s_' + k, v => M.stock[k] = v, true);
+$('#comment').addEventListener('input', e => { dayRec(DAY).comment = e.target.value; touchDay(DAY); save(); });
 document.querySelectorAll('[data-inc]').forEach(b => b.onclick = () => {
-  const r = dayRec(DAY); r.trucks = Math.max(0, (num(r.trucks) ?? lastTrucks()) + +b.dataset.by); save(); render();
+  const r = dayRec(DAY); r.trucks = Math.max(0, (num(r.trucks) ?? lastTrucks()) + +b.dataset.by); touchDay(DAY); save(); render();
 });
 const lastTrucks = () => { const d = Object.keys(M.days).filter(k => k < DAY && M.days[k].trucks != null).sort().pop(); return d ? M.days[d].trucks : 0; };
 document.querySelectorAll('.pl').forEach(b => b.onclick = () => {
-  const r = dayRec(DAY); r.plants = PLANTS.map((_, i) => !!(r.plants || [])[i]); r.plants[+b.dataset.p] = !r.plants[+b.dataset.p]; save(); render();
+  const r = dayRec(DAY); r.plants = PLANTS.map((_, i) => !!(r.plants || [])[i]); r.plants[+b.dataset.p] = !r.plants[+b.dataset.p];
+  touchDay(DAY); save(); render();
 });
-$('#gearBtn').onclick = () => { $('#main').classList.add('hidden'); $('#dateBar').classList.add('hidden'); $('#settings').classList.remove('hidden'); };
+function openSettings() {
+  $('#main').classList.add('hidden'); $('#dateBar').classList.add('hidden'); $('#settings').classList.remove('hidden');
+  if (!SY) {
+    $('#syncHint').textContent = 'Checking…';
+    api({a: 'info'}).then(j => $('#syncHint').textContent = j.setup
+      ? 'Type the password you chose on your first device.'
+      : 'Choose a password for the online save. Every device you use will ask for it once.')
+      .catch(() => $('#syncHint').textContent = 'No internet right now.');
+  } else $('#syncHint').textContent = 'This device is connected: every change is saved online and shows on your other devices.';
+}
+$('#gearBtn').onclick = openSettings;
+$('#syncBtn').onclick = openSettings;
+$('#syncSetup').onclick = openSettings;
 $('#backBtn').onclick = () => { $('#settings').classList.add('hidden'); $('#main').classList.remove('hidden'); $('#dateBar').classList.remove('hidden'); render(); };
-$('#clearDay').onclick = () => { if (confirm('Clear everything typed for ' + DAY + '?')) { delete M.days[DAY]; save(); render(); toast('Cleared'); } };
+$('#clearDay').onclick = () => { if (confirm('Clear everything typed for ' + DAY + '?')) { M.days[DAY] = {}; touchDay(DAY); save(); render(); toast('Cleared'); } };
+$('#syncGo').onclick = async () => {
+  const pw = $('#syncPw').value, b = $('#syncGo');
+  if (pw.length < 4) return toast('At least 4 characters');
+  b.disabled = true; b.textContent = 'Connecting…';
+  try {
+    const first = await connect(pw);
+    $('#syncPw').value = '';
+    toast(first ? 'Password set. Use the same one on your other devices' : 'Connected', 3000);
+    await pull(); push(); openSettings();
+  } catch (err) { toast(err.code === 'auth' ? 'Wrong password' : 'Could not connect: ' + err.message, 3000); }
+  b.disabled = false; b.textContent = 'Connect';
+};
+$('#syncOff').onclick = () => {
+  if (!confirm('Stop saving online on this device? The days stay on this device and online.')) return;
+  SY = null; AES = null; try { localStorage.removeItem('dp-sync'); } catch {}
+  syncState('none', 'Not connected'); openSettings();
+};
+// back on the app, or back online: get the other devices' changes and send ours
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && SY) pull().then(push); });
+addEventListener('online', () => SY && push());
 
 /* ---------- stock PDF: the number right under each column title ---------- */
 async function readStockPdf(buf) {
@@ -328,7 +483,7 @@ $('#pdfFile').onchange = async e => {
   try {
     const s = await readStockPdf(await f.arrayBuffer());
     const missing = MATERIALS.filter(([k]) => s[k] == null).map(m => m[1]);
-    Object.assign(M.stock, s); save(); render();
+    Object.assign(M.stock, s); touchMeta(); save(); render();
     $('#pdfPick').classList.add('done'); $('#pdfName').textContent = f.name;
     toast(missing.length ? 'Not found in the PDF: ' + missing.join(', ') : 'Stock filled from the PDF');
   } catch (err) { $('#pdfName').textContent = 'Could not read it'; toast(err.message); }
@@ -358,7 +513,7 @@ $('#fuelFile').onchange = async e => {
   try {
     const wb = XLSX.read(await f.arrayBuffer(), {type: 'array', cellDates: true, dense: true});
     const {total, n} = readFuel(wb, monthKey(DAY));
-    M.fuel = total; save(); render();
+    M.fuel = total; touchMeta(); save(); render();
     $('#fuelPick').classList.add('done'); $('#fuelName').textContent = f.name;
     toast(n ? `Fuel: ${fmt(total)} L from ${n} mixer refills` : 'No mixer fuel for this month in that file');
   } catch (err) { $('#fuelName').textContent = 'Could not read it'; toast(err.message); }
@@ -381,7 +536,11 @@ async function loadPumps(quiet) {
       for (const r of rows.slice(1)) {
         if (!(r[0] instanceof Date)) continue;
         const d = iso(r[0]), q = num(r[tc]), c = num(r[tc + 1]);
-        if (q) { const rec = dayRec(d); rec.pump = q; if (c) rec.pumps = c; days++; }
+        if (q) {
+          const rec = dayRec(d); days++;
+          // only a real change counts, otherwise reloading pumps would make this device's old copy of the day "newest"
+          if (rec.pump !== q || (c && rec.pumps !== c)) { rec.pump = q; if (c) rec.pumps = c; touchDay(d); }
+        }
       }
       break;
     }
@@ -412,14 +571,137 @@ $('#impFile').onchange = async e => {
       const rec = {trucks: num(v('C' + r)), plants: 'DEFGH'.split('').map(c => v(c + r) === true),
         prod: num(v('I' + r)), pump: num(v('Q' + r)), pumps: num(v('R' + r)), comment: v('T' + r) || ''};
       if (rec.trucks == null && rec.prod == null && rec.pump == null) continue;
-      M.days[day] = rec; n++;
+      M.days[day] = rec; touchDay(day); n++;
     }
     if (mk && mk !== monthKey(DAY)) throw new Error('That file is for ' + mk + '. Pick a day in that month first.');
     const base = ws.P2 && ws.P2.f && ws.P2.f.match(/^(\d+(?:\.\d+)?)\s*\+/); if (base) M.ytdBase = +base[1];
     MATERIALS.forEach(([k], i) => { const x = num(v('J' + (41 + i))); if (x != null) M.stock[k] = x; });
     if (num(v('X5')) != null) M.fuel = num(v('X5'));
-    save(); render(); $('#impName').textContent = f.name; toast(`Loaded ${n} days from the Excel`);
+    touchMeta(); save(); render(); $('#impName').textContent = f.name; toast(`Loaded ${n} days from the Excel`);
   } catch (err) { toast(err.message, 3500); }
+  e.target.value = '';
+};
+
+/* ---------- update the month's Excel file ----------
+   The picked .xlsx is edited in place (only the value cells inside the sheet's XML), so the logo, colours,
+   checkboxes, formulas and conditional formatting stay exactly as the user made them. Excel recalculates
+   the formulas when it opens the file. Only cells the app has a value for are written. */
+const JSZIP = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js';
+const NS = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main';
+const colNum = ref => ref.replace(/\d+/g, '').split('').reduce((n, ch) => n * 26 + ch.charCodeAt(0) - 64, 0);
+async function fillExcel(buf) {
+  if (!window.JSZip) await loadScript(JSZIP);
+  const zip = await JSZip.loadAsync(buf), xml = s => new DOMParser().parseFromString(s, 'application/xml');
+  const wbx = xml(await zip.file('xl/workbook.xml').async('string'));
+  const rels = xml(await zip.file('xl/_rels/workbook.xml.rels').async('string'));
+  const sh = [...wbx.getElementsByTagNameNS(NS, 'sheet')].find(s => s.getAttribute('name') === 'Trucks & Plants')
+    || wbx.getElementsByTagNameNS(NS, 'sheet')[0];
+  const rid = sh.getAttribute('r:id') || sh.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id');
+  const target = [...rels.getElementsByTagName('Relationship')].find(r => r.getAttribute('Id') === rid).getAttribute('Target');
+  const path = target.startsWith('/') ? target.slice(1) : 'xl/' + target.replace(/^\.\//, '');
+  const doc = xml(await zip.file(path).async('string')), data = doc.getElementsByTagNameNS(NS, 'sheetData')[0];
+  // cells covered by a merge (not its top-left) are never written
+  const hidden = new Set();
+  for (const mc of doc.getElementsByTagNameNS(NS, 'mergeCell')) {
+    const [a, b] = mc.getAttribute('ref').split(':'), r1 = +a.match(/\d+/)[0], r2 = +b.match(/\d+/)[0];
+    for (let r = r1; r <= r2; r++) for (let c = colNum(a); c <= colNum(b); c++) if (r !== r1 || c !== colNum(a)) hidden.add(c + ':' + r);
+  }
+  const rowEl = r => {
+    let row = [...data.getElementsByTagNameNS(NS, 'row')].find(x => +x.getAttribute('r') === r);
+    if (!row) { row = doc.createElementNS(NS, 'row'); row.setAttribute('r', r);
+      const after = [...data.getElementsByTagNameNS(NS, 'row')].find(x => +x.getAttribute('r') > r); data.insertBefore(row, after || null); }
+    return row;
+  };
+  const cellEl = ref => {
+    const row = rowEl(+ref.match(/\d+/)[0]), cells = [...row.getElementsByTagNameNS(NS, 'c')];
+    let c = cells.find(x => x.getAttribute('r') === ref);
+    if (!c) { c = doc.createElementNS(NS, 'c'); c.setAttribute('r', ref); row.insertBefore(c, cells.find(x => colNum(x.getAttribute('r')) > colNum(ref)) || null); }
+    return c;
+  };
+  const sstFile = zip.file('xl/sharedStrings.xml'), stylesFile = zip.file('xl/styles.xml');
+  const sst = sstFile ? [...xml(await sstFile.async('string')).getElementsByTagNameNS(NS, 'si')]
+    .map(si => [...si.getElementsByTagNameNS(NS, 't')].map(t => t.textContent).join('')) : [];
+  const styles = stylesFile ? xml(await stylesFile.async('string')) : null;
+  const cellText = c => { const t = c.getAttribute('t'), v = c.getElementsByTagNameNS(NS, 'v')[0];
+    if (t === 's') return v ? sst[+v.textContent] : null;
+    if (t === 'inlineStr') return [...c.getElementsByTagNameNS(NS, 't')].map(x => x.textContent).join('');
+    if (t === 'b') return v ? v.textContent === '1' : null;
+    return v ? +v.textContent : null; };
+  const read = ref => { const c = [...data.getElementsByTagNameNS(NS, 'c')].find(x => x.getAttribute('r') === ref);
+    const v = c && c.getElementsByTagNameNS(NS, 'v')[0]; return v ? v.textContent : null; };
+  // the cell's own font, so the red (brackets) part of a comment looks like the rest of it
+  const runFont = (c, red) => {
+    const rPr = doc.createElementNS(NS, 'rPr');
+    const xf = styles && styles.getElementsByTagNameNS(NS, 'cellXfs')[0]?.getElementsByTagNameNS(NS, 'xf')[+(c.getAttribute('s') || 0)];
+    const font = xf && styles.getElementsByTagNameNS(NS, 'fonts')[0].getElementsByTagNameNS(NS, 'font')[+(xf.getAttribute('fontId') || 0)];
+    for (const ch of font ? font.children : []) {
+      if (ch.localName === 'color' && red) continue;
+      const el = doc.createElementNS(NS, ch.localName === 'name' ? 'rFont' : ch.localName);
+      for (const a of ch.attributes) el.setAttribute(a.name, a.value);
+      rPr.appendChild(el);
+    }
+    if (red) { const col = doc.createElementNS(NS, 'color'); col.setAttribute('rgb', 'FFFF0000');
+      const order = ['b', 'i', 'strike', 'condense', 'extend', 'outline', 'shadow', 'u', 'vertAlign', 'sz'];
+      const after = [...rPr.children].find(x => !order.includes(x.localName)); rPr.insertBefore(col, after || null); }
+    return rPr;
+  };
+  let written = 0;
+  const put = (ref, val) => {
+    if (val == null || val === '' || hidden.has(colNum(ref) + ':' + ref.match(/\d+/)[0])) return;
+    const c = cellEl(ref);
+    if (c.getElementsByTagNameNS(NS, 'f').length) return;                   // never overwrite a formula
+    if (cellText(c) === val) return;                                         // same value: leave the cell as the user made it
+    while (c.firstChild) c.removeChild(c.firstChild);
+    const v = doc.createElementNS(NS, 'v');
+    if (typeof val === 'boolean') { c.setAttribute('t', 'b'); v.textContent = val ? '1' : '0'; c.appendChild(v); }
+    else if (typeof val === 'number') { c.removeAttribute('t'); v.textContent = String(val); c.appendChild(v); }
+    else {
+      c.setAttribute('t', 'inlineStr'); const is = doc.createElementNS(NS, 'is');
+      for (const part of val.split(/(\([^)]*\))/).filter(Boolean)) {          // (…) in red, like the report image
+        const r = doc.createElementNS(NS, 'r'), t = doc.createElementNS(NS, 't');
+        r.appendChild(runFont(c, part.startsWith('(')));
+        t.setAttributeNS('http://www.w3.org/XML/1998/namespace', 'xml:space', 'preserve'); t.textContent = part;
+        r.appendChild(t); is.appendChild(r);
+      }
+      c.appendChild(is);
+    }
+    written++;
+  };
+  // the date column decides which row is which day (Excel serial dates, 1900 system)
+  const mk = monthKey(DAY); let days = 0, matched = 0;
+  for (let r = FIRST_XL_ROW; r <= LAST_XL_ROW; r++) {
+    const serial = num(read('B' + r)); if (!serial) continue;
+    const d = iso(new Date(Date.UTC(1899, 11, 30) + serial * 864e5 + new Date().getTimezoneOffset() * 6e4));
+    if (monthKey(d) !== mk || !M.days[d]) continue;
+    const rec = M.days[d], before = written;
+    put('C' + r, num(rec.trucks));
+    if (rec.plants && (rec.trucks != null || rec.prod != null)) 'DEFGH'.split('').forEach((col, k) => put(col + r, !!rec.plants[k]));
+    put('I' + r, num(rec.prod)); put('Q' + r, num(rec.pump)); put('R' + r, num(rec.pumps)); put('T' + r, rec.comment || null);
+    if (rec.trucks != null || rec.prod != null) { matched++; rowEl(r).removeAttribute('hidden'); }   // the sheet keeps days to come hidden
+    if (written > before) days++;
+  }
+  MATERIALS.forEach(([k], i) => put('J' + (41 + i), num(M.stock[k])));
+  put('X5', num(M.fuel));
+  // ask Excel to recalculate every formula when the file opens
+  let calc = wbx.getElementsByTagNameNS(NS, 'calcPr')[0];
+  if (!calc) { calc = wbx.createElementNS(NS, 'calcPr'); wbx.documentElement.appendChild(calc); }
+  calc.setAttribute('fullCalcOnLoad', '1');
+  const ser = d => new XMLSerializer().serializeToString(d);
+  zip.file(path, ser(doc), {createFolders: false}); zip.file('xl/workbook.xml', ser(wbx), {createFolders: false});
+  return {days, matched, blob: await zip.generateAsync({type: 'blob', compression: 'DEFLATE',
+    mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'})};
+}
+const FIRST_XL_ROW = 6, LAST_XL_ROW = 36;
+$('#xlFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $('#xlName').textContent = 'Filling…';
+  try {
+    const {days, matched, blob} = await fillExcel(await f.arrayBuffer());
+    if (!matched) throw new Error('That file has no filled day of ' + monthKey(DAY) + ' from this app');
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = f.name; a.click();
+    $('#xlName').textContent = `${f.name} · ${days ? days + ' day(s) updated' : 'already up to date'}`;
+    toast('Excel ready in Downloads: save it over the old one', 3500);
+  } catch (err) { $('#xlName').textContent = 'Could not fill it'; toast(err.message, 3500); }
   e.target.value = '';
 };
 
@@ -487,25 +769,45 @@ async function reportBlob() {
   const canvas = await html2canvas($('#report'), {scale: 1.5, backgroundColor: '#ffffff', logging: false});
   return new Promise(r => canvas.toBlob(r, 'image/png'));
 }
-$('#shareBtn').onclick = async () => {
-  const b = $('#shareBtn'); b.disabled = true; b.textContent = 'Making the image…';
-  try {
-    const blob = await reportBlob(), name = `Productivity ${DAY}.png`;
-    $('#previewImg').src = URL.createObjectURL(blob); $('#preview').classList.remove('hidden');
-    const file = new File([blob], name, {type: 'image/png'});
-    if (navigator.canShare && navigator.canShare({files: [file]})) {
-      try { await navigator.share({files: [file], title: 'Daily Productivity ' + DAY}); }
-      catch (err) { if (err.name !== 'AbortError') throw err; }
-    } else {
-      const a = document.createElement('a'); a.href = $('#previewImg').src; a.download = name; a.click();
-      toast('Image saved. Send it from your gallery / downloads');
-    }
-  } catch (err) { toast('Could not make the image: ' + err.message, 3500); }
-  b.disabled = false; b.textContent = 'Share report image';
-};
+// The image is made once and reused by Open / Share / Copy until something in the month changes
+let IMG = null;
+function reportImage() {
+  const key = DAY + JSON.stringify(M);
+  if (!IMG || IMG.key !== key) IMG = {key, blob: reportBlob().then(b => {
+    $('#previewImg').src = URL.createObjectURL(b); $('#preview').classList.remove('hidden'); return b; })};
+  IMG.blob.catch(() => { IMG = null; });
+  return IMG.blob;
+}
+const imgName = () => `Productivity ${DAY}.png`;
+async function busy(btn, label, job) {
+  const old = btn.textContent; btn.disabled = true; btn.textContent = label;
+  try { await job(); } catch (err) { if (err.name !== 'AbortError') toast('Could not make the image: ' + err.message, 3500); }
+  btn.disabled = false; btn.textContent = old;
+}
+$('#openBtn').onclick = () => busy($('#openBtn'), '…', async () => {
+  const blob = await reportImage();
+  // full size in a new tab; if the phone blocks that, the picture below is the full report
+  if (!window.open(URL.createObjectURL(blob), '_blank')) $('#preview').scrollIntoView({behavior: 'smooth'});
+});
+$('#shareBtn').onclick = () => busy($('#shareBtn'), '…', async () => {
+  const blob = await reportImage(), file = new File([blob], imgName(), {type: 'image/png'});
+  if (navigator.canShare && navigator.canShare({files: [file]})) await navigator.share({files: [file], title: 'Daily Productivity ' + DAY});
+  else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = imgName(); a.click();
+    toast('Image saved. Send it from your gallery / downloads'); }
+});
+$('#copyBtn').onclick = () => busy($('#copyBtn'), '…', async () => {
+  if (!navigator.clipboard || !window.ClipboardItem) return toast('Copying a picture does not work here: use Share', 3000);
+  // the promise goes straight into ClipboardItem so the phone still counts it as the tap's action
+  try { await navigator.clipboard.write([new ClipboardItem({'image/png': reportImage()})]); }
+  catch (err) { if (err.name === 'NotAllowedError') return toast('This browser blocked copying a picture: use Share', 3500); throw err; }
+  toast('Copied: paste it in WhatsApp');
+});
+$('#previewImg').onclick = () => $('#openBtn').click();
 
+syncState(SY ? 'busy' : 'none', SY ? 'Loading…' : 'Not connected');
 render();
-loadPumps(true);
+// pumps after the online copy is in, so they update the newest version of each day
+(PULL || Promise.resolve()).then(() => loadPumps(true)).then(push);
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
