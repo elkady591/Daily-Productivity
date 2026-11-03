@@ -7,6 +7,10 @@
 <meta name="robots" content="noindex">
 <title>Daily Productivity</title>
 <link rel="manifest" href="manifest.json">
+<!-- the sheet's fonts for the report image: ADLaM Display, Carlito (= Calibri, same widths),
+     Archivo Black (for Arial Black) and Barlow (for Bahnschrift) where the device lacks the Windows ones -->
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=ADLaM+Display&family=Archivo+Black&family=Barlow:wght@400;600&family=Carlito:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
 <link rel="icon" href="icon-192.png">
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>
@@ -90,31 +94,16 @@ button{font:inherit;color:inherit;cursor:pointer}
 .toast.on{opacity:1}
 .hidden{display:none!important}
 
-/* ---------- the report (drawn off-screen, then turned into the image): the Excel sheet's own grid ---------- */
-#report{position:fixed;left:-10000px;top:0;background:#fff;color:#000;padding:16px 20px 20px;
-  font:11px/1.2 Calibri,Carlito,"Segoe UI",Arial,sans-serif}
+/* ---------- the report (drawn off-screen from template.xlsx's own cells, then turned into the image) ---------- */
+#report{position:fixed;left:-10000px;top:0;background:#fff;color:#000;padding:12px}
+#report .sheet{position:relative}
 #report table{border-collapse:collapse;table-layout:fixed}
-#report td{border:1px solid #000;padding:2px 3px;text-align:center;white-space:nowrap;height:18px;font-weight:700}
-#report td.n{border:0}                       /* empty sheet area, no grid */
-#report td.g{background:#a9d08e}             /* green header / label */
-#report td.b{background:#ddebf7}             /* light blue */
-#report td.h{white-space:normal;line-height:1.15;height:46px}
-#report td.big{font-size:17px}
-#report td.mid{font-size:15px}
-#report td.red{color:#f00}
-#report td.miss{background:#f00}
-#report td.cm{background:#ff0;white-space:normal;font-size:10px}
-#report td.w{font-weight:400}
-#report .ck{display:inline-block;width:11px;height:11px;border:1.3px solid #000;border-radius:2px;vertical-align:middle;
-  position:relative;background:#fff}
+#report td{padding:0 3px;overflow:hidden;line-height:1.12;box-sizing:border-box;border:0}
+#report .logo{position:absolute;display:block}
+#report .ck{display:inline-block;width:13px;height:13px;border:1.5px solid #000;border-radius:2px;vertical-align:middle;
+  position:relative;background:#fff;box-sizing:border-box}
 #report .ck.on{background:#000}
-#report .ck.on::after{content:"";position:absolute;left:3px;top:0;width:3px;height:6px;border:solid #fff;border-width:0 1.6px 1.6px 0;transform:rotate(45deg)}
-#report .logo{text-align:left;vertical-align:top;padding:4px 0 0 60px}
-#report .logo img{height:60px;display:block}
-#report .logo span{display:block;font:400 19px/1.1 "Segoe UI",Arial,sans-serif;color:#8c8c8c;letter-spacing:.2px;margin-top:2px}
-#report .ytd{border:2px solid #7f7f7f;background:#f2f2f2;font-size:19px;text-align:left;padding-left:8px}
-#report .ytd b{color:#00b050;margin:0 12px 0 14px}
-#report sup{font-size:.6em}
+#report .ck.on::after{content:"";position:absolute;left:3.5px;top:0.5px;width:3px;height:6.5px;border:solid #fff;border-width:0 1.7px 1.7px 0;transform:rotate(45deg)}
 </style>
 </head>
 <body>
@@ -834,69 +823,192 @@ $('#xlBtn').onclick = async () => {
 // Comment text for the report: anything in (brackets) is red, like the quantities in the sheet
 const commentHtml = s => (s || '').replace(/[<&]/g, c => c === '<' ? '&lt;' : '&amp;')
   .replace(/\([^)]*\)/g, m => `<span style="color:#f00">${m}</span>`);
-// Column widths of the sheet, B..T
-const COLS = [115, 55, 31, 31, 31, 31, 31, 97, 75, 92, 70, 62, 85, 75, 90, 80, 80, 78, 275];
-function buildReport() {
-  // the days from the 1st up to the selected day (the image grows by one row every morning)
-  const mk = monthKey(DAY), last = +DAY.slice(8), T = M.nTrucks, P = M.nPlants;
-  const rows = [], avg = {c: [], j: [], l: [], n: [], o: [], p: [], r: [], s: []};
-  const work = PLANTS.map(() => 0);
+/* The sheet's look, read once from template.xlsx: column widths, row heights, merges, every cell's
+   font / fill / borders / alignment / number format, the colour rules and the logo picture. */
+let LOOK = null;
+async function sheetLook() {
+  if (LOOK) return LOOK;
+  const {zip, doc} = await openSheet(await (await fetch('template.xlsx')).arrayBuffer());
+  const A = 'http://schemas.openxmlformats.org/drawingml/2006/main', X = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing';
+  const all = (p, n) => [...p.getElementsByTagNameNS(NS, n)], kids = el => el ? [...el.children] : [];
+  const kid = (el, n) => kids(el).find(x => x.localName === n);
+  // theme colours: Excel's theme index 0..3 is lt1, dk1, lt2, dk2, then the accents
+  const cs = xml(await zip.file('xl/theme/theme1.xml').async('string')).getElementsByTagNameNS(A, 'clrScheme')[0];
+  const theme = ['lt1', 'dk1', 'lt2', 'dk2', 'accent1', 'accent2', 'accent3', 'accent4', 'accent5', 'accent6', 'hlink', 'folHlink']
+    .map(n => { const c = cs.getElementsByTagNameNS(A, n)[0].firstElementChild; return c.getAttribute('lastClr') || c.getAttribute('val'); });
+  const tint = (hex, t) => {
+    if (!t) return '#' + hex;
+    let [r, g, b] = [0, 2, 4].map(i => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const mx = Math.max(r, g, b), mn = Math.min(r, g, b); let h = 0, s = 0, l = (mx + mn) / 2;
+    if (mx !== mn) { const d = mx - mn; s = l > .5 ? d / (2 - mx - mn) : d / (mx + mn);
+      h = mx === r ? (g - b) / d + (g < b ? 6 : 0) : mx === g ? (b - r) / d + 2 : (r - g) / d + 4; h /= 6; }
+    l = t < 0 ? l * (1 + t) : l * (1 - t) + t;
+    const f = (p, q, x) => { x = (x + 1) % 1; return x < 1 / 6 ? p + (q - p) * 6 * x : x < .5 ? q : x < 2 / 3 ? p + (q - p) * (2 / 3 - x) * 6 : p; };
+    const q = l < .5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+    return '#' + (s ? [f(p, q, h + 1 / 3), f(p, q, h), f(p, q, h - 1 / 3)] : [l, l, l]).map(v => Math.round(v * 255).toString(16).padStart(2, '0')).join('');
+  };
+  const color = el => !el ? null : el.getAttribute('rgb') ? '#' + el.getAttribute('rgb').slice(-6)
+    : el.getAttribute('theme') != null ? tint(theme[+el.getAttribute('theme')], +(el.getAttribute('tint') || 0))
+    : ({9: '#ffffff', 10: '#ff0000'})[el.getAttribute('indexed')] || '#000000';
+  const font = f => f && ({b: !!kid(f, 'b'), i: !!kid(f, 'i'), u: !!kid(f, 'u'), sz: +(kid(f, 'sz')?.getAttribute('val') || 11),
+    color: color(kid(f, 'color')), name: (kid(f, 'name') || kid(f, 'rFont'))?.getAttribute('val') || 'Calibri', va: kid(f, 'vertAlign')?.getAttribute('val')});
+  const st = xml(await zip.file('xl/styles.xml').async('string')), sec = n => all(st, n)[0];
+  const fonts = kids(sec('fonts')).map(font);
+  const fills = kids(sec('fills')).map(f => { const p = f.firstElementChild; return p && p.getAttribute('patternType') === 'solid' ? color(kid(p, 'fgColor')) : null; });
+  const edge = (b, n) => { const e = kid(b, n), s = e && e.getAttribute('style'); if (!s) return null;
+    return {w: s === 'thick' ? 3 : /^medium/.test(s) ? 2 : 1, dash: /[Dd]ash|[Dd]ot/.test(s) ? 'dashed' : 'solid', c: color(kid(e, 'color')) || '#000'}; };
+  const borders = kids(sec('borders')).map(b => ({left: edge(b, 'left'), right: edge(b, 'right'), top: edge(b, 'top'), bottom: edge(b, 'bottom')}));
+  const codes = {1: '0', 2: '0.00', 3: '#,##0', 4: '#,##0.00', 9: '0%', 10: '0.00%', 14: 'd-mmm'};
+  all(st, 'numFmt').forEach(n => codes[n.getAttribute('numFmtId')] = n.getAttribute('formatCode'));
+  const xfs = kids(sec('cellXfs')).map(x => { const al = kid(x, 'alignment');
+    return {font: fonts[+(x.getAttribute('fontId') || 0)], fill: fills[+(x.getAttribute('fillId') || 0)], border: borders[+(x.getAttribute('borderId') || 0)],
+      fmt: codes[x.getAttribute('numFmtId') || '0'] || 'General', h: al?.getAttribute('horizontal'), v: al?.getAttribute('vertical'), wrap: al?.getAttribute('wrapText') === '1'}; });
+  const dxfs = kids(sec('dxfs')).map(d => ({color: color(kid(kid(d, 'font'), 'color')), fill: color(kid(kid(kid(d, 'fill'), 'patternFill'), 'bgColor'))}));
+  // shared strings keep their rich-text runs (the m³ superscripts, coloured words)
+  const sstF = zip.file('xl/sharedStrings.xml');
+  const sst = sstF ? all(xml(await sstF.async('string')), 'si').map(si => { const runs = all(si, 'r');
+    return runs.length ? runs.map(r => ({t: all(r, 't').map(t => t.textContent).join(''), f: font(kid(r, 'rPr'))}))
+      : [{t: all(si, 't').map(t => t.textContent).join('')}]; }) : [];
+  const sf = all(doc, 'sheetFormatPr')[0], cols = {}, rows = {}, cells = {};
+  const defW = +(sf?.getAttribute('defaultColWidth') || 8.43), defH = +(sf?.getAttribute('defaultRowHeight') || 15);
+  for (const c of all(doc, 'col')) for (let i = +c.getAttribute('min'); i <= +c.getAttribute('max'); i++) cols[i] = +c.getAttribute('width');
+  for (const r of all(doc, 'row')) {
+    rows[+r.getAttribute('r')] = r.getAttribute('ht') ? +r.getAttribute('ht') : defH;
+    for (const c of all(r, 'c')) { const t = c.getAttribute('t'), v = all(c, 'v')[0]?.textContent;
+      cells[c.getAttribute('r')] = {s: +(c.getAttribute('s') || 0), v: v == null ? null : t === 's' ? sst[+v] : t === 'b' ? v === '1' : t === 'str' ? v : +v}; }
+  }
+  const cf = [];
+  for (const g of all(doc, 'conditionalFormatting')) for (const rule of all(g, 'cfRule'))
+    cf.push({ranges: g.getAttribute('sqref').split(' '), type: rule.getAttribute('type'), op: rule.getAttribute('operator'),
+      f: all(rule, 'formula').map(x => +x.textContent), dxf: dxfs[+rule.getAttribute('dxfId')] || {}});
+  let logo = null;
+  const dr = zip.file('xl/drawings/drawing1.xml'), pic = zip.file(/^xl\/media\/image1\.(png|jpe?g)$/)[0];
+  if (dr && pic) { const d = xml(await dr.async('string')), from = d.getElementsByTagNameNS(X, 'from')[0], ext = d.getElementsByTagNameNS(X, 'ext')[0];
+    const g = n => +from.getElementsByTagNameNS(X, n)[0].textContent;
+    if (from && ext) logo = {col: g('col') + 1, x: g('colOff') / 9525, row: g('row') + 1, y: g('rowOff') / 9525,
+      w: +ext.getAttribute('cx') / 9525, h: +ext.getAttribute('cy') / 9525, url: URL.createObjectURL(await pic.async('blob'))}; }
+  return LOOK = {xfs, cols, defW, rows, defH, cells, merges: all(doc, 'mergeCell').map(m => m.getAttribute('ref')), cf, logo};
+}
+
+// The app's numbers, by cell, for the days from the 1st up to the selected day (the image grows a row a day)
+function reportValues() {
+  const mk = monthKey(DAY), last = +DAY.slice(8), T = M.nTrucks, P = M.nPlants, V = {};
+  const avg = {C: [], J: [], L: [], N: [], O: [], P: [], R: [], S: []}, work = PLANTS.map(() => 0);
   let mtdP = 0, pumpSum = 0;
-  const td = (v, cls = '', dec = 0) => `<td class="${cls}">${typeof v === 'number' ? fmt(v, dec) : v ?? ''}</td>`;
-  const red = (cls, v, lim) => cls + (v != null && v < lim ? ' red' : '');
   for (let i = 1; i <= last; i++) {
-    const d = mk + '-' + pad(i), r = M.days[d] || {}, I = num(r.prod), C = num(r.trucks);
+    const d = mk + '-' + pad(i), r = M.days[d] || {}, row = FIRST_XL_ROW + i - 1, I = num(r.prod), C = num(r.trucks);
     const pl = PLANTS.map((_, k) => !!(r.plants || [])[k]); pl.forEach((on, k) => on && work[k]++);
     const has = I != null, np = pl.filter(Boolean).length || null;
-    const J = has && C ? I / C * 30 : null, K = has && C ? I / C / 12 : null, L = has ? I / T * 30 : null, Mm = has ? I / T / 12 : null;
-    const O = has && np ? I / np : null, Pp = has ? I / P : null, Q = num(r.pump), R = num(r.pumps), S = Q && R ? Q / R : null;
-    if (has) mtdP += I; pumpSum += Q || 0;
-    if (C != null) avg.c.push(C); if (J != null) avg.j.push(J); if (L != null) avg.l.push(L);
-    if (has && np) avg.n.push(np); if (O != null) avg.o.push(O); if (Pp != null) avg.p.push(Pp); if (R) avg.r.push(R); if (S != null) avg.s.push(S);
-    const pump = Q ? 'b' : 'miss';                 // the sheet paints missing pump numbers red
-    rows.push(`<tr>${td(new Date(d + 'T00:00').toLocaleDateString('en-GB', {day: 'numeric', month: 'short'}).replace(' ', '-'), 'g')}
-      ${td(C, 'w')}${pl.map(on => `<td><span class="ck${on ? ' on' : ''}"></span></td>`).join('')}${td(I, 'w')}
-      ${td(J, red('b', J, 1500))}${td(K, red('b', K, 4.5))}${td(L, red('b', L, 1500))}${td(Mm, red('b', Mm, 4.5))}
-      ${td(has ? np : null, 'w')}${td(O, red('', O, 400))}${td(Pp, red('', Pp, 400))}
-      ${td(Q, pump)}${td(R, pump)}${td(S, pump)}
-      ${td(commentHtml(r.comment), r.comment ? 'cm' : '')}</tr>`);
+    const vals = {B: daySerial(d), C, I, Q: num(r.pump), R: num(r.pumps),
+      J: has && C ? I / C * 30 : null, K: has && C ? I / C / 12 : null, L: has ? I / T * 30 : null, M: has ? I / T / 12 : null,
+      N: has ? np : null, O: has && np ? I / np : null, P: has ? I / P : null};
+    vals.S = vals.Q && vals.R ? vals.Q / vals.R : null;
+    vals.T = r.comment ? {comment: r.comment} : null;
+    'DEFGH'.split('').forEach((col, k) => vals[col] = pl[k]);
+    for (const [k, v] of Object.entries(vals)) V[k + row] = v;
+    if (has) mtdP += I; pumpSum += vals.Q || 0;
+    for (const k of Object.keys(avg)) if (typeof vals[k] === 'number') avg[k].push(vals[k]);   // AVERAGE skips the "" cells
   }
   const A = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
-  const ytd = M.ytdBase != null ? M.ytdBase + mtdP : null;
-  const n = k => `<td class="n" colspan="${k}"></td>`;
-  $('#report').innerHTML = `<table style="width:${COLS.reduce((a, b) => a + b)}px">
-    <colgroup>${COLS.map(w => `<col style="width:${w}px">`).join('')}</colgroup>
-    <tr><td class="n logo" colspan="8" rowspan="3"><img src="logo.png" alt=""><span>NUCLEAR CONCRETE MIXES</span></td>
-      ${n(4)}<td class="ytd" colspan="4">YTD Production :<b>${fmt(ytd)}</b>m<sup>3</sup></td>${n(3)}</tr>
-    <tr><td class="big" colspan="4">Trucks</td><td class="big" colspan="3">Plants</td><td class="big" colspan="3" rowspan="2">Pumps</td>${n(1)}</tr>
-    <tr><td class="g big" colspan="2">Actual</td><td class="g big" colspan="2">(${T} Trucks)</td>
-      <td class="g big" colspan="2">Actual</td><td class="g big">${P} Plants</td>${n(1)}</tr>
-    <tr>${['Date', 'Working Trucks', ...PLANTS, 'Production', 'Productivity Per truck', 'Trips for Each Truck', 'Productivity Per truck',
-      'Trips for Each Truck', 'Number Of Working Plants', 'Productivity Per Plant', 'Productivity Per Plant', 'Pumped Quantity',
-      'Number of Working Pumps', 'Productivity for Workimg Pump Per Day'].map(h => td(h, 'g h')).join('')}<td class="g h mid">Comment</td></tr>
-    ${rows.join('')}
-    <tr style="height:26px">${td('Averages', 'g')}${td(A(avg.c), 'g mid')}${n(6)}${td(A(avg.j), red('g mid', A(avg.j), 1500))}${n(1)}
-      ${td(A(avg.l), red('g mid', A(avg.l), 1500))}${n(1)}${td(A(avg.n), 'g mid')}${td(A(avg.o), 'g mid')}${td(A(avg.p), 'g mid')}
-      ${td('')}${td(A(avg.r), 'g mid')}${td(A(avg.s), 'g mid')}${n(1)}</tr>
-    <tr>${td('Consumption for Trucks (L/m<sup>3</sup>)', 'b h')}${td(mtdP && M.fuel != null ? M.fuel / mtdP : null, 'b', 2)}${n(2)}
-      <td class="b" colspan="3">MTD Production</td>${td(mtdP, 'big')}${n(7)}<td class="b" colspan="2">Productivity For ${M.nPumps} Pumps</td>
-      ${td(pumpSum / M.nPumps, 'big')}${n(1)}</tr>
-    <tr><td class="g h" colspan="2">Working Days for Each Plant in the month</td>${work.map(w => td(w, 'g')).join('')}${n(12)}</tr>
-    <tr>${n(7)}${td('Materials', 'b h')}${td('Current Stock (TON )', 'b h')}${td('To be Produced (m<sup>3</sup>)', 'b h')}${n(9)}</tr>
-    ${MATERIALS.map(([k, nm, f]) => `<tr style="height:25px">${n(7)}${td(nm, 'mid w')}${td(M.stock[k], 'mid')}
-      ${td(M.stock[k] != null ? M.stock[k] / f : null, 'mid')}${n(9)}</tr>`).join('')}
-  </table>`;
+  for (const k of Object.keys(avg)) V[k + 37] = A(avg[k]);
+  Object.assign(V, {P2: M.ytdBase != null ? M.ytdBase + mtdP : null, I38: mtdP, C38: mtdP && M.fuel != null ? M.fuel / mtdP : null,
+    S38: pumpSum / M.nPumps});
+  'DEFGH'.split('').forEach((col, k) => V[col + 39] = work[k]);
+  MATERIALS.forEach(([k, , f], i) => { V['J' + (41 + i)] = num(M.stock[k]); V['K' + (41 + i)] = M.stock[k] != null ? M.stock[k] / f : null; });
+  return {V, lastRow: FIRST_XL_ROW + last - 1};
+}
+
+// The sheet's fonts → the same font when this device has it, else the closest web font (loaded in <head>).
+// Single quotes: these go inside style="…". w = the weight that font name stands for.
+const XL_FONTS = {
+  'ADLaM Display': {f: `'ADLaM Display', Carlito, sans-serif`},
+  'Arial Black': {f: `'Arial Black', 'Archivo Black', sans-serif`, w: 900},
+  'Bahnschrift SemiBold': {f: `'Bahnschrift SemiBold', Bahnschrift, Barlow, sans-serif`, w: 600},
+  'Bahnschrift': {f: `Bahnschrift, Barlow, sans-serif`}};
+const XL_FONT = n => (XL_FONTS[n] || {f: `Carlito, Calibri, '${n}', sans-serif`}).f;
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function xlNumber(v, code) {
+  if (/mmm/.test(code)) { const d = new Date(Date.UTC(1899, 11, 30) + v * 864e5); return d.getUTCDate() + '-' + MON[d.getUTCMonth()]; }
+  const c = code.split(';')[0], pct = c.includes('%'), dec = (c.match(/\.(0+)/) || ['', ''])[1].length;
+  if (c === 'General') return Number.isInteger(v) ? String(v) : String(+v.toFixed(2));
+  return (pct ? v * 100 : v).toLocaleString('en-US', {minimumFractionDigits: dec, maximumFractionDigits: dec, useGrouping: c.includes(',')}) + (pct ? '%' : '');
+}
+async function buildReport() {
+  const S = await sheetLook(), {V, lastRow} = reportValues(), C1 = 2, C2 = 20;            // columns B..T, like the picture you send
+  const shown = []; for (let r = 1; r <= 44; r++) if (r < FIRST_XL_ROW || (r <= lastRow) || r > LAST_XL_ROW) shown.push(r);
+  const L = c => String.fromCharCode(64 + c), ref = (c, r) => L(c) + r;
+  const colPx = c => Math.trunc(((256 * (S.cols[c] ?? S.defW) + Math.trunc(128 / 7)) / 256) * 7);
+  const rowPx = r => Math.round((S.rows[r] ?? S.defH) * 4 / 3);
+  const xfAt = (c, r) => S.xfs[(S.cells[ref(c, r)] || {}).s || 0];
+  const valueAt = (c, r) => ref(c, r) in V ? V[ref(c, r)] : (S.cells[ref(c, r)] || {}).v ?? null;
+  const span = {}, covered = new Set();
+  for (const m of S.merges) {
+    const [a, b] = m.split(':'), c1 = colNum(a), r1 = +a.match(/\d+/)[0], c2 = colNum(b || a), r2 = +(b || a).match(/\d+/)[0];
+    if (c1 > C2 || c2 < C1) continue;
+    const rs = shown.filter(r => r >= r1 && r <= r2).length; if (!rs) continue;
+    span[c1 + ':' + r1] = {cs: Math.min(c2, C2) - c1 + 1, rs, c2: Math.min(c2, C2), r2};
+    for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) if (r !== r1 || c !== c1) covered.add(c + ':' + r);
+  }
+  const inRange = (c, r, range) => { const [a, b] = range.split(':');
+    return c >= colNum(a) && c <= colNum(b || a) && r >= +a.match(/\d+/)[0] && r <= +(b || a).match(/\d+/)[0]; };
+  const esc = s => String(s).replace(/[<&]/g, ch => ch === '<' ? '&lt;' : '&amp;');
+  const fontCss = f => `font-family:${XL_FONT(f.name)};font-size:${f.sz * 4 / 3}px;font-weight:${(XL_FONTS[f.name] || {}).w || (f.b ? 700 : 400)};${f.i ? 'font-style:italic;' : ''}${f.u ? 'text-decoration:underline;' : ''}`;
+  const run = (t, f) => { const sup = f && f.va === 'superscript';
+    return `<span style="${f ? fontCss(f) + (f.color ? 'color:' + f.color + ';' : '') : ''}${sup ? 'vertical-align:super;font-size:' + (f.sz * 4 / 3 * .62) + 'px;' : ''}">${esc(t)}</span>`; };
+  const bd = e => e ? `${e.w}px ${e.dash} ${e.c}` : 'none';
+  let html = `<table style="width:${Array.from({length: C2 - C1 + 1}, (_, i) => colPx(C1 + i)).reduce((a, b) => a + b)}px">`
+    + `<colgroup>${Array.from({length: C2 - C1 + 1}, (_, i) => `<col style="width:${colPx(C1 + i)}px">`).join('')}</colgroup>`;
+  for (const r of shown) {
+    html += `<tr style="height:${rowPx(r)}px">`;
+    for (let c = C1; c <= C2; c++) {
+      if (covered.has(c + ':' + r)) continue;
+      const sp = span[c + ':' + r], x = xfAt(c, r), f = x.font || {sz: 11, name: 'Calibri'}, v = valueAt(c, r);
+      // a merged cell takes its right edge from its top-right cell and its bottom edge from its bottom-left cell
+      const right = sp ? xfAt(sp.c2, r).border.right : x.border.right, bottom = sp ? xfAt(c, sp.r2).border.bottom : x.border.bottom;
+      let fill = x.fill, color = f.color;
+      for (const rule of S.cf) if (rule.ranges.some(g => inRange(c, r, g))) {
+        const blank = v == null || v === '', hit = rule.type === 'containsBlanks' ? blank
+          : rule.type === 'cellIs' && typeof v === 'number' && (rule.op === 'lessThan' ? v < rule.f[0] : rule.op === 'greaterThan' ? v > rule.f[0]
+            : rule.op === 'between' ? v >= rule.f[0] && v <= rule.f[1] : rule.op === 'equal' ? v === rule.f[0] : false);
+        if (hit) { fill = rule.dxf.fill || fill; color = rule.dxf.color || color; }
+      }
+      let content = '', h = x.h;
+      if (typeof v === 'boolean') { content = `<span class="ck${v ? ' on' : ''}"></span>`; h = h || 'center'; }
+      else if (typeof v === 'number') { content = esc(xlNumber(v, x.fmt)); h = h || 'right'; }
+      else if (Array.isArray(v)) content = v.map(p => run(p.t, p.f)).join('');
+      else if (v && v.comment) { content = commentHtml(v.comment); fill = '#ffff00'; }   // a comment is highlighted yellow, as you do in the sheet
+      else if (v != null) content = esc(v);
+      html += `<td${sp ? ` colspan="${sp.cs}" rowspan="${sp.rs}"` : ''} style="${fontCss(f)}color:${color || '#000'};${fill ? 'background:' + fill + ';' : ''}`
+        + `text-align:${h === 'centerContinuous' ? 'center' : h || 'left'};vertical-align:${x.v === 'center' ? 'middle' : x.v === 'top' ? 'top' : 'bottom'};`
+        + `white-space:${x.wrap ? 'normal' : 'nowrap'};border-left:${bd(x.border.left)};border-top:${bd(x.border.top)};`
+        + `border-right:${bd(right)};border-bottom:${bd(bottom)}">${content}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</table>';
+  const lg = S.logo;
+  if (lg && lg.col >= C1) {
+    let left = lg.x, top = lg.y;
+    for (let c = C1; c < lg.col; c++) left += colPx(c);
+    for (const r of shown) if (r < lg.row) top += rowPx(r);
+    html += `<img class="logo" src="${lg.url}" alt="" style="left:${left}px;top:${top}px;width:${lg.w}px;height:${lg.h}px">`;
+  }
+  $('#report').innerHTML = `<div class="sheet">${html}</div>`;
 }
 async function reportBlob() {
   if (!window.html2canvas) await loadScript(H2C);
-  buildReport();
+  await buildReport();
+  // the sheet's fonts must be ready before the picture is taken
+  await Promise.all(['400 16px "ADLaM Display"', '400 16px Carlito', '700 16px Carlito', '400 16px "Archivo Black"', '600 16px Barlow']
+    .map(f => document.fonts.load(f).catch(() => null)));
   await Promise.all([...$('#report').querySelectorAll('img')].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
-  const canvas = await html2canvas($('#report'), {scale: 1.5, backgroundColor: '#ffffff', logging: false});
+  const canvas = await html2canvas($('#report'), {scale: 1, backgroundColor: '#ffffff', logging: false});
   return new Promise(r => canvas.toBlob(r, 'image/png'));
 }
 // The image is made once and reused by Open / Share / Copy until something in the month changes
 let IMG = null;
 function reportImage() {
+  if (M.ytdBase == null) toast('YTD is empty: set "YTD before this month" in ⚙', 3500);
   const key = DAY + JSON.stringify(M);
   if (!IMG || IMG.key !== key) IMG = {key, blob: reportBlob().then(b => {
     $('#previewImg').src = URL.createObjectURL(b); $('#preview').classList.remove('hidden'); return b; })};
