@@ -424,6 +424,9 @@ $('#impFile').onchange = async e => {
 };
 
 /* ---------- the report image (same layout as the Excel sheet) ---------- */
+// Comment text for the report: anything in (brackets) is red, like the quantities in the sheet
+const commentHtml = s => (s || '').replace(/[<&]/g, c => c === '<' ? '&lt;' : '&amp;')
+  .replace(/\([^)]*\)/g, m => `<span style="color:#f00">${m}</span>`);
 // Column widths of the sheet, B..T
 const COLS = [115, 55, 31, 31, 31, 31, 31, 97, 75, 92, 70, 62, 85, 75, 90, 80, 80, 78, 275];
 function buildReport() {
@@ -449,7 +452,7 @@ function buildReport() {
       ${td(J, red('b', J, 1500))}${td(K, red('b', K, 4.5))}${td(L, red('b', L, 1500))}${td(Mm, red('b', Mm, 4.5))}
       ${td(has ? np : null, 'w')}${td(O, red('', O, 400))}${td(Pp, red('', Pp, 400))}
       ${td(Q, pump)}${td(R, pump)}${td(S, pump)}
-      ${td((r.comment || '').replace(/[<&]/g, c => c === '<' ? '&lt;' : '&amp;'), r.comment ? 'cm' : '')}</tr>`);
+      ${td(commentHtml(r.comment), r.comment ? 'cm' : '')}</tr>`);
   }
   const A = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   const ytd = M.ytdBase != null ? M.ytdBase + mtdP : null;
