@@ -681,6 +681,9 @@ async function fillExcel(buf) {
   };
   // the date column decides which row is which day (Excel serial dates, 1900 system)
   const mk = monthKey(DAY); let days = 0, matched = 0;
+  // the same comment on days in a row: written once, in the first day's cell, and the cells merged
+  const runs = commentRuns(mk, daysIn(mk)).filter(([a, b]) => ![...Array(b - a + 1)].some((_, k) => hidden.has(colNum('T') + ':' + (a + k))));
+  runs.forEach(([a, b]) => { for (let r = a + 1; r <= b; r++) hidden.add(colNum('T') + ':' + r); });
   for (let r = FIRST_XL_ROW; r <= LAST_XL_ROW; r++) {
     const serial = num(read('B' + r)); if (!serial) continue;
     const d = iso(new Date(Date.UTC(1899, 11, 30) + serial * 864e5 + new Date().getTimezoneOffset() * 6e4));
@@ -694,6 +697,17 @@ async function fillExcel(buf) {
   }
   MATERIALS.forEach(([k], i) => put('J' + (41 + i), num(M.stock[k])));
   put('X5', num(M.fuel));
+  if (runs.length) {
+    let mcs = doc.getElementsByTagNameNS(NS, 'mergeCells')[0];
+    if (!mcs) { mcs = doc.createElementNS(NS, 'mergeCells');                          // goes right after sheetData
+      const after = data.nextSibling; data.parentNode.insertBefore(mcs, after); }
+    for (const [a, b] of runs) {
+      for (let r = a + 1; r <= b; r++) { const c = cellEl('T' + r);                     // the lower cells keep their style, lose their text
+        if (!c.getElementsByTagNameNS(NS, 'f').length) { while (c.firstChild) c.removeChild(c.firstChild); c.removeAttribute('t'); } }
+      const mc = doc.createElementNS(NS, 'mergeCell'); mc.setAttribute('ref', `T${a}:T${b}`); mcs.appendChild(mc);
+    }
+    mcs.setAttribute('count', mcs.getElementsByTagNameNS(NS, 'mergeCell').length);
+  }
   return {days, matched, blob: await packSheet(sheet)};
 }
 
@@ -890,6 +904,17 @@ async function sheetLook() {
   return LOOK = {xfs, cols, defW, rows, defH, cells, merges: all(doc, 'mergeCell').map(m => m.getAttribute('ref')), cf, logo};
 }
 
+// Days in a row with the same comment share one merged comment cell: [[firstRow, lastRow], …] (sheet rows)
+function commentRuns(mk, lastDay) {
+  const runs = [], text = i => ((M.days[mk + '-' + pad(i)] || {}).comment || '').trim();
+  for (let i = 1; i <= lastDay; i++) {
+    let j = i; while (j < lastDay && text(i) && text(j + 1) === text(i)) j++;
+    if (j > i) runs.push([FIRST_XL_ROW + i - 1, FIRST_XL_ROW + j - 1]);
+    i = j;
+  }
+  return runs;
+}
+
 // The app's numbers, by cell, for the days from the 1st up to the selected day (the image grows a row a day)
 function reportValues() {
   const mk = monthKey(DAY), last = +DAY.slice(8), T = M.nTrucks, P = M.nPlants, V = {};
@@ -942,7 +967,8 @@ async function buildReport() {
   const xfAt = (c, r) => S.xfs[(S.cells[ref(c, r)] || {}).s || 0];
   const valueAt = (c, r) => ref(c, r) in V ? V[ref(c, r)] : (S.cells[ref(c, r)] || {}).v ?? null;
   const span = {}, covered = new Set();
-  for (const m of S.merges) {
+  const sameComment = commentRuns(monthKey(DAY), lastRow - FIRST_XL_ROW + 1).map(([a, b]) => `T${a}:T${b}`);
+  for (const m of S.merges.concat(sameComment)) {
     const [a, b] = m.split(':'), c1 = colNum(a), r1 = +a.match(/\d+/)[0], c2 = colNum(b || a), r2 = +(b || a).match(/\d+/)[0];
     if (c1 > C2 || c2 < C1) continue;
     const rs = shown.filter(r => r >= r1 && r <= r2).length; if (!rs) continue;
