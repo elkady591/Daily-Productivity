@@ -99,8 +99,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 /* ---------- the report (drawn off-screen from template.xlsx's own cells, then turned into the image) ---------- */
 #report{position:fixed;left:-10000px;top:0;background:#fff;color:#000;padding:4px 6px 8px}
 #report .sheet{position:relative}
-#report table{border-collapse:collapse;table-layout:fixed}
-#report td{padding:0 3px;overflow:hidden;line-height:1.3;box-sizing:border-box;border:0}
+#report .cell{position:absolute;display:flex;box-sizing:border-box;padding:1px 4px;line-height:1.3}
+#report .ln{position:absolute;box-sizing:border-box;z-index:2}
 #report .logo{position:absolute;display:block}
 #report .ck{display:inline-block;width:13px;height:13px;border:1.5px solid #000;border-radius:2px;vertical-align:middle;
   position:relative;background:#fff;box-sizing:border-box}
@@ -201,9 +201,6 @@ button{font:inherit;color:inherit;cursor:pointer}
     <h3>This month</h3>
     <div class="field"><label for="ytdBase">YTD before this month</label>
       <input id="ytdBase" class="num" type="number" inputmode="decimal"><span class="unit">m³</span></div>
-    <div class="field"><label for="nTrucks">Trucks (fleet)</label><input id="nTrucks" class="num" type="number" inputmode="numeric"></div>
-    <div class="field"><label for="nPlants">Plants (fleet)</label><input id="nPlants" class="num" type="number" inputmode="numeric"></div>
-    <div class="field"><label for="nPumps">Pumps (fleet)</label><input id="nPumps" class="num" type="number" inputmode="numeric"></div>
   </div>
   <div class="box">
     <h3>🗂️ Archive</h3>
@@ -236,7 +233,6 @@ const PUMP_URL = 'https://docs.google.com/spreadsheets/d/11MNcgcyM98BkZhNE4XQOoE
 const PLANTS = ['L1', 'L2', 'V3', 'V4', 'V5'];
 // Stock in tons -> m³ that can still be produced (the sheet's "To be Produced")
 const MATERIALS = [['cement', 'Cement', 0.45], ['sand', 'Sand', 0.85], ['agg1', 'Aggregate (1)', 0.75], ['agg2', 'Aggregate (2)', 0.46]];
-const DEFAULTS = {nTrucks: 25, nPlants: 4, nPumps: 8};
 
 const $ = s => document.querySelector(s);
 const fmt = (v, dec = 0) => v == null || !isFinite(v) ? '' : v.toLocaleString('en-US', {minimumFractionDigits: dec, maximumFractionDigits: dec});
@@ -260,8 +256,7 @@ function loadMonth(mk) {
   if (!m) {
     // a new month starts its YTD where last month ended
     const [y, mo] = mk.split('-').map(Number), prev = store.get('dp-' + iso(new Date(y, mo - 2, 1)).slice(0, 7));
-    m = {days: {}, stock: {}, fuel: null, ytdBase: prev && prev.ytdBase != null ? prev.ytdBase + mtd(prev) : null, ...DEFAULTS};
-    if (prev) Object.assign(m, {nTrucks: prev.nTrucks, nPlants: prev.nPlants, nPumps: prev.nPumps});
+    m = {days: {}, stock: {}, fuel: null, ytdBase: prev && prev.ytdBase != null ? prev.ytdBase + mtd(prev) : null};
   }
   return m;
 }
@@ -272,7 +267,7 @@ const save = () => store.set('dp-' + monthKey(DAY), M);
    on the user's Apps Script (sync-backend/Code.gs), encrypted here with a key from the password; the newest
    change (t) wins. This device keeps only the key and a token derived from the password, never the password. */
 const SYNC_URL = 'https://script.google.com/macros/s/AKfycbzF1Xr5-tuCwplLyHOIbmexW88Qco1KwGCz-hjQ_FXi8u5ugYQFGL1Da3GfBUze_u_MHg/exec';
-const META_KEYS = ['stock', 'fuel', 'ytdBase', 'nTrucks', 'nPlants', 'nPumps'];
+const META_KEYS = ['stock', 'fuel', 'ytdBase'];
 const enc = new TextEncoder(), dec = new TextDecoder();
 const b64 = u => btoa(String.fromCharCode(...u)), unb64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 let SY = store.get('dp-sync'), AES = null;
@@ -380,7 +375,7 @@ function render(fromPull) {
   $('#fuel').value = M.fuel ?? '';
   const done = r.trucks != null && r.prod != null;
   $('#dayState').textContent = done ? '✓ saved' : 'not filled yet'; $('#dayState').className = 'st ' + (done ? 'ok' : '');
-  $('#ytdBase').value = M.ytdBase ?? ''; $('#nTrucks').value = M.nTrucks; $('#nPlants').value = M.nPlants; $('#nPumps').value = M.nPumps;
+  $('#ytdBase').value = M.ytdBase ?? '';
   const filled = Object.keys(M.days).filter(d => M.days[d].prod != null).sort();
   $('#savedInfo').innerHTML = `<div class="kv"><span>Days with production</span><b class="num">${filled.length}</b></div>
     <div class="kv"><span>MTD production</span><b class="num">${fmt(mtd(M))} m³</b></div>
@@ -403,7 +398,6 @@ onNum('#pumpQty', v => dayRec(DAY).pump = v);
 onNum('#pumpCnt', v => dayRec(DAY).pumps = v);
 onNum('#fuel', v => M.fuel = v, true);
 onNum('#ytdBase', v => M.ytdBase = v, true);
-for (const k of ['nTrucks', 'nPlants', 'nPumps']) onNum('#' + k, v => M[k] = v || DEFAULTS[k], true);
 for (const [k] of MATERIALS) onNum('#s_' + k, v => M.stock[k] = v, true);
 $('#comment').addEventListener('input', e => { dayRec(DAY).comment = e.target.value; touchDay(DAY); save(); });
 document.querySelectorAll('[data-inc]').forEach(b => b.onclick = () => {
@@ -894,8 +888,12 @@ async function sheetLook() {
   for (const r of all(doc, 'row')) {
     rows[+r.getAttribute('r')] = r.getAttribute('ht') ? +r.getAttribute('ht') : defH;
     for (const c of all(r, 'c')) { const t = c.getAttribute('t'), v = all(c, 'v')[0]?.textContent;
-      cells[c.getAttribute('r')] = {s: +(c.getAttribute('s') || 0), v: v == null ? null : t === 's' ? sst[+v] : t === 'b' ? v === '1' : t === 'str' ? v : +v}; }
+      cells[c.getAttribute('r')] = {s: +(c.getAttribute('s') || 0), f: all(c, 'f')[0]?.textContent || '',
+        v: v == null ? null : t === 's' ? sst[+v] : t === 'b' ? v === '1' : t === 'str' ? v : +v}; }
   }
+  // the fleet numbers written inside the sheet's own formulas: L6 =…(I6/25)…, P6 =…(I6/4)…, S38 =SUM(Q6:Q36)/8
+  const divisor = (ref, d) => { const m = (cells[ref]?.f || '').match(/\/\s*(\d+(?:\.\d+)?)\s*\)?\s*(?:\*|,|$)/); return m ? +m[1] : d; };
+  const fleet = {trucks: divisor('L6', 25), plants: divisor('P6', 4), pumps: divisor('S38', 8)};
   const cf = [];
   for (const g of all(doc, 'conditionalFormatting')) for (const rule of all(g, 'cfRule'))
     cf.push({ranges: g.getAttribute('sqref').split(' '), type: rule.getAttribute('type'), op: rule.getAttribute('operator'),
@@ -906,7 +904,7 @@ async function sheetLook() {
     const g = n => +from.getElementsByTagNameNS(X, n)[0].textContent;
     if (from && ext) logo = {col: g('col') + 1, x: g('colOff') / 9525, row: g('row') + 1, y: g('rowOff') / 9525,
       w: +ext.getAttribute('cx') / 9525, h: +ext.getAttribute('cy') / 9525, url: URL.createObjectURL(await pic.async('blob'))}; }
-  return LOOK = {xfs, cols, defW, rows, defH, cells, merges: all(doc, 'mergeCell').map(m => m.getAttribute('ref')), cf, logo};
+  return LOOK = {xfs, cols, defW, rows, defH, cells, merges: all(doc, 'mergeCell').map(m => m.getAttribute('ref')), cf, logo, fleet};
 }
 
 // Days in a row with the same comment share one merged comment cell: [[firstRow, lastRow], …] (sheet rows)
@@ -921,8 +919,9 @@ function commentRuns(mk, lastDay) {
 }
 
 // The app's numbers, by cell, for the days from the 1st up to the selected day (the image grows a row a day)
-function reportValues() {
-  const mk = monthKey(DAY), last = +DAY.slice(8), T = M.nTrucks, P = M.nPlants, V = {};
+function reportValues(fleet) {
+  // 25 trucks / 4 plants / 8 pumps come from the sheet's formulas, so the picture always matches the Excel
+  const mk = monthKey(DAY), last = +DAY.slice(8), T = fleet.trucks, P = fleet.plants, V = {};
   const avg = {C: [], J: [], L: [], N: [], O: [], P: [], R: [], S: []}, work = PLANTS.map(() => 0);
   let mtdP = 0, pumpSum = 0;
   for (let i = 1; i <= last; i++) {
@@ -942,7 +941,7 @@ function reportValues() {
   const A = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
   for (const k of Object.keys(avg)) V[k + 37] = A(avg[k]);
   Object.assign(V, {P2: M.ytdBase != null ? M.ytdBase + mtdP : null, I38: mtdP, C38: mtdP && M.fuel != null ? M.fuel / mtdP : null,
-    S38: pumpSum / M.nPumps});
+    S38: pumpSum / fleet.pumps});
   'DEFGH'.split('').forEach((col, k) => V[col + 39] = work[k]);
   MATERIALS.forEach(([k, , f], i) => { V['J' + (41 + i)] = num(M.stock[k]); V['K' + (41 + i)] = M.stock[k] != null ? M.stock[k] / f : null; });
   return {V, lastRow: FIRST_XL_ROW + last - 1};
@@ -964,21 +963,26 @@ function xlNumber(v, code) {
   return (pct ? v * 100 : v).toLocaleString('en-US', {minimumFractionDigits: dec, maximumFractionDigits: dec, useGrouping: c.includes(',')}) + (pct ? '%' : '');
 }
 async function buildReport() {
-  const S = await sheetLook(), {V, lastRow} = reportValues(), C1 = 2, C2 = 20;            // columns B..T, like the picture you send
+  const S = await sheetLook(), {V, lastRow} = reportValues(S.fleet), C1 = 2, C2 = 20;            // columns B..T, like the picture you send
   const shown = []; for (let r = 1; r <= 44; r++) if (r < FIRST_XL_ROW || (r <= lastRow) || r > LAST_XL_ROW) shown.push(r);
   const L = c => String.fromCharCode(64 + c), ref = (c, r) => L(c) + r;
   const colPx = c => Math.trunc(((256 * (S.cols[c] ?? S.defW) + Math.trunc(128 / 7)) / 256) * 7);
   const rowPx = r => Math.round((S.rows[r] ?? S.defH) * 4 / 3);
   const xfAt = (c, r) => S.xfs[(S.cells[ref(c, r)] || {}).s || 0];
   const valueAt = (c, r) => ref(c, r) in V ? V[ref(c, r)] : (S.cells[ref(c, r)] || {}).v ?? null;
-  const span = {}, covered = new Set();
+  // the grid: X[i] = left edge of column C1+i, Y[i] = top edge of shown[i] (the last entry = the far edge)
+  const X = [0]; for (let c = C1; c <= C2; c++) X.push(X[X.length - 1] + colPx(c));
+  const Y = [0]; for (const r of shown) Y.push(Y[Y.length - 1] + rowPx(r));
+  const ri = new Map(shown.map((r, i) => [r, i]));
+  // merged areas: every cell inside points at the same area object
+  const area = {};
   const sameComment = commentRuns(monthKey(DAY), lastRow - FIRST_XL_ROW + 1).map(([a, b]) => `T${a}:T${b}`);
   for (const m of S.merges.concat(sameComment)) {
-    const [a, b] = m.split(':'), c1 = colNum(a), r1 = +a.match(/\d+/)[0], c2 = colNum(b || a), r2 = +(b || a).match(/\d+/)[0];
+    const [a, b] = m.split(':'), c1 = colNum(a), r1 = +a.match(/\d+/)[0], c2 = Math.min(colNum(b || a), C2), r2 = +(b || a).match(/\d+/)[0];
     if (c1 > C2 || c2 < C1) continue;
-    const rs = shown.filter(r => r >= r1 && r <= r2).length; if (!rs) continue;
-    span[c1 + ':' + r1] = {cs: Math.min(c2, C2) - c1 + 1, rs, c2: Math.min(c2, C2), r2};
-    for (let r = r1; r <= r2; r++) for (let c = c1; c <= c2; c++) if (r !== r1 || c !== c1) covered.add(c + ':' + r);
+    const rows = shown.filter(r => r >= r1 && r <= r2); if (!rows.length) continue;
+    const A = {c1, c2, r1: rows[0], r2: rows[rows.length - 1]};
+    for (const r of rows) for (let c = c1; c <= c2; c++) area[c + ':' + r] = A;
   }
   const inRange = (c, r, range) => { const [a, b] = range.split(':');
     return c >= colNum(a) && c <= colNum(b || a) && r >= +a.match(/\d+/)[0] && r <= +(b || a).match(/\d+/)[0]; };
@@ -986,16 +990,14 @@ async function buildReport() {
   const fontCss = f => `font-family:${XL_FONT(f.name)};font-size:${f.sz * 4 / 3}px;font-weight:${(XL_FONTS[f.name] || {}).w || (f.b ? 700 : 400)};${f.i ? 'font-style:italic;' : ''}${f.u ? 'text-decoration:underline;' : ''}`;
   const run = (t, f) => { const sup = f && f.va === 'superscript';
     return `<span style="${f ? fontCss(f) + (f.color ? 'color:' + f.color + ';' : '') : ''}${sup ? 'vertical-align:super;font-size:' + (f.sz * 4 / 3 * .62) + 'px;' : ''}">${esc(t)}</span>`; };
-  const bd = e => e ? `${e.w}px ${e.dash} ${e.c}` : 'none';
-  let html = `<table style="width:${Array.from({length: C2 - C1 + 1}, (_, i) => colPx(C1 + i)).reduce((a, b) => a + b)}px">`
-    + `<colgroup>${Array.from({length: C2 - C1 + 1}, (_, i) => `<col style="width:${colPx(C1 + i)}px">`).join('')}</colgroup>`;
+  let html = '';
+  // 1) the cells: each one (a merged area as one) placed exactly on the grid, with its fill, font and text
   for (const r of shown) {
-    html += `<tr style="height:${rowPx(r)}px">`;
     for (let c = C1; c <= C2; c++) {
-      if (covered.has(c + ':' + r)) continue;
-      const sp = span[c + ':' + r], x = xfAt(c, r), f = x.font || {sz: 11, name: 'Calibri'}, v = valueAt(c, r);
-      // a merged cell takes its right edge from its top-right cell and its bottom edge from its bottom-left cell
-      const right = sp ? xfAt(sp.c2, r).border.right : x.border.right, bottom = sp ? xfAt(c, sp.r2).border.bottom : x.border.bottom;
+      const A = area[c + ':' + r];
+      if (A && (A.c1 !== c || A.r1 !== r)) continue;
+      const x = xfAt(c, r), f = x.font || {sz: 11, name: 'Calibri'}, v = valueAt(c, r);
+      const left = X[c - C1], top = Y[ri.get(r)], w = X[(A ? A.c2 : c) - C1 + 1] - left, hgt = Y[ri.get(A ? A.r2 : r) + 1] - top;
       let fill = x.fill, color = f.color;
       for (const rule of S.cf) if (rule.ranges.some(g => inRange(c, r, g))) {
         const blank = v == null || v === '', hit = rule.type === 'containsBlanks' ? blank
@@ -1009,14 +1011,37 @@ async function buildReport() {
       else if (Array.isArray(v)) content = v.map(p => run(p.t, p.f)).join('');
       else if (v && v.comment) { content = commentHtml(v.comment); fill = '#ffff00'; }   // a comment is highlighted yellow, as you do in the sheet
       else if (v != null) content = esc(v);
-      html += `<td${sp ? ` colspan="${sp.cs}" rowspan="${sp.rs}"` : ''} style="${fontCss(f)}color:${color || '#000'};${fill ? 'background:' + fill + ';' : ''}`
-        + `text-align:${h === 'centerContinuous' ? 'center' : h || 'left'};vertical-align:${x.v === 'center' ? 'middle' : x.v === 'top' ? 'top' : 'bottom'};`
-        + `white-space:${x.wrap ? 'normal' : 'nowrap'};border-left:${bd(x.border.left)};border-top:${bd(x.border.top)};`
-        + `border-right:${bd(right)};border-bottom:${bd(bottom)}">${content}</td>`;
+      if (!content && !fill) continue;
+      const hz = h === 'center' || h === 'centerContinuous' ? 'center' : h === 'right' ? 'flex-end' : 'flex-start';
+      html += `<div class="cell" style="left:${left}px;top:${top}px;width:${w}px;height:${hgt}px;${fontCss(f)}color:${color || '#000'};`
+        + `${fill ? 'background:' + fill + ';' : ''}justify-content:${hz};align-items:${x.v === 'center' ? 'center' : x.v === 'top' ? 'flex-start' : 'flex-end'};`
+        + `white-space:${x.wrap ? 'normal' : 'nowrap'}"><span style="text-align:${hz === 'flex-end' ? 'right' : hz === 'center' ? 'center' : 'left'}">${content}</span></div>`;
     }
-    html += '</tr>';
   }
-  html += '</table>';
+  // 2) the lines, the way Excel draws them: every edge between two cells shows the heavier of the two
+  //    cells' lines on that side; edges inside a merged area are not drawn; each part of a merged area's
+  //    outline comes from the cell it belongs to
+  const side = (c, r, s) => c < C1 || c > C2 ? null : xfAt(c, r).border[s];
+  const heavier = (a, b) => !a ? b : !b ? a : b.w > a.w ? b : a;
+  const sameArea = (c1, r1, c2, r2) => { const a = area[c1 + ':' + r1]; return !!a && a === area[c2 + ':' + r2]; };
+  const line = (l, t, w, h, e) => `<div class="ln" style="left:${l}px;top:${t}px;width:${w}px;height:${h}px;`
+    + (e.dash === 'solid' ? `background:${e.c}` : `border-${w > h ? 'top' : 'left'}:${e.w}px dashed ${e.c}`) + '"></div>';
+  for (let i = 0; i <= shown.length; i++) {
+    const up = shown[i - 1], dn = shown[i];
+    for (let c = C1; c <= C2; c++) {
+      if (up != null && dn != null && sameArea(c, up, c, dn)) continue;
+      const e = heavier(up != null ? side(c, up, 'bottom') : null, dn != null ? side(c, dn, 'top') : null);
+      if (e) html += line(X[c - C1] - Math.ceil(e.w / 2), Y[i] - Math.floor(e.w / 2), X[c - C1 + 1] - X[c - C1] + e.w, e.w, e);
+    }
+  }
+  for (let i = 0; i < shown.length; i++) {
+    const r = shown[i];
+    for (let c = C1; c <= C2 + 1; c++) {
+      if (c > C1 && c <= C2 && sameArea(c - 1, r, c, r)) continue;
+      const e = heavier(side(c - 1, r, 'right'), side(c, r, 'left'));
+      if (e) html += line(X[c - C1] - Math.floor(e.w / 2), Y[i] - Math.ceil(e.w / 2), e.w, Y[i + 1] - Y[i] + e.w, e);
+    }
+  }
   const lg = S.logo;
   if (lg && lg.col >= C1) {
     let left = lg.x, top = lg.y;
@@ -1024,7 +1049,7 @@ async function buildReport() {
     for (const r of shown) if (r < lg.row) top += rowPx(r);
     html += `<img class="logo" src="${lg.url}" alt="" style="left:${left}px;top:${top}px;width:${lg.w}px;height:${lg.h}px">`;
   }
-  $('#report').innerHTML = `<div class="sheet">${html}</div>`;
+  $('#report').innerHTML = `<div class="sheet" style="width:${X[X.length - 1]}px;height:${Y[Y.length - 1]}px">${html}</div>`;
 }
 async function reportBlob() {
   if (!window.html2canvas) await loadScript(H2C);
