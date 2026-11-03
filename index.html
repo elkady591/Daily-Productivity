@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#d9631e">
+<meta name="robots" content="noindex">
+<title>Daily Productivity</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  --bg:#f3f2ee; --card:#ffffff; --ink:#1c1c1a; --muted:#6c6b66; --line:#e2e0d8;
+  --chip:#e9e7df; --accent:#d9631e; --accent-ink:#ffffff; --hl:#fff6ef; --ok:#2e7d32; --bad:#d32f2f;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#131312; --card:#1e1e1c; --ink:#f1f0ea; --muted:#a19f97; --line:#34332f;
+    --chip:#2a2a27; --accent:#f08a4b; --accent-ink:#1a1009; --hl:#2a201a; --ok:#66bb6a; --bad:#ef5350;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font:16px/1.45 "Segoe UI",Tahoma,system-ui,-apple-system,Roboto,"Noto Sans Arabic",sans-serif;
+  -webkit-tap-highlight-color:transparent;padding-bottom:40px}
+.wrap{max-width:640px;margin:0 auto;padding:0 14px}
+.num{direction:ltr;unicode-bidi:isolate;font-variant-numeric:tabular-nums}
+button{font:inherit;color:inherit;cursor:pointer}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:5;background:var(--bg);padding:12px 0 8px;border-bottom:1px solid var(--line)}
+.title{display:flex;align-items:center;gap:8px}
+.title h1{font-size:19px;margin:0;display:flex;align-items:center;gap:7px;white-space:nowrap}
+.title h1 img{height:30px;width:auto;display:block}
+.title small{color:var(--muted);font-size:12px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gear{flex:none;width:40px;height:40px;display:grid;place-items:center;border:0;background:none;color:var(--muted);border-radius:10px;padding:0}
+.gear:active{background:var(--chip)}
+.datebar{display:flex;align-items:center;gap:6px;margin-top:8px}
+.datebar input{flex:1;min-width:0;font:inherit;font-size:17px;font-weight:700;padding:8px 10px;border-radius:10px;
+  border:1.5px solid var(--line);background:var(--card);color:var(--ink);outline:none}
+.datebar .step{width:44px;height:44px}
+
+.box{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-top:12px}
+.box h3{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px}
+.box h3 .st{margin-left:auto;font-size:12px;font-weight:600;color:var(--muted)}
+.box h3 .st.ok{color:var(--ok)} .box h3 .st.bad{color:var(--bad)}
+.box p.hint{margin:-4px 0 10px;color:var(--muted);font-size:13px}
+.field{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+.field label{flex:0 0 112px;font-weight:600;font-size:14px}
+.field input,.field textarea{flex:1;min-width:0;font:inherit;font-size:20px;font-weight:700;padding:7px 10px;border-radius:10px;
+  border:1.5px solid var(--line);background:var(--bg);color:var(--ink);outline:none}
+.field textarea{font-size:15px;font-weight:400;resize:vertical;min-height:44px}
+.field input:focus,.field textarea:focus{border-color:var(--accent)}
+.field .unit{color:var(--muted);font-size:13px;flex:none}
+.step{flex:none;width:44px;height:44px;border-radius:10px;border:0;background:var(--chip);font-size:22px;font-weight:700}
+.plants{display:grid;grid-template-columns:repeat(5,1fr);gap:6px}
+.pl{border:1.5px solid var(--line);background:var(--bg);border-radius:10px;padding:10px 0;font-weight:800;font-size:16px}
+.pl.on{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+.files{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pick{position:relative;border:1.5px dashed var(--line);border-radius:12px;padding:12px 8px;text-align:center;background:var(--bg)}
+.pick b{display:block;font-size:14px}
+.pick span{display:block;font-size:12px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pick.done{border-style:solid;border-color:var(--ok)}
+.pick input{position:absolute;inset:0;opacity:0;width:100%;cursor:pointer}
+.vals{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.v{background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:6px 8px}
+.v span{display:block;font-size:11px;color:var(--muted)}
+.v input{width:100%;border:0;background:none;font:inherit;font-size:18px;font-weight:700;color:var(--ink);outline:none;padding:0}
+.v.wide{grid-column:1/-1}
+.btn{display:block;width:100%;border:0;border-radius:12px;padding:13px;background:var(--accent);color:var(--accent-ink);font-weight:700;font-size:16px}
+.btn.ghost{background:var(--chip);color:var(--ink)}
+.btn + .btn{margin-top:8px}
+.row2{display:flex;gap:8px}.row2 .btn{margin-top:0}
+.preview{margin-top:12px;border:1px solid var(--line);border-radius:12px;overflow:auto;background:#fff}
+.preview img{display:block;width:100%;height:auto}
+.kv{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:4px 0}
+.kv span{color:var(--muted)}
+.set h2{font-size:20px;margin:14px 0 4px}
+.back{border:0;background:none;color:var(--accent);font-weight:700;padding:12px 0 4px;font-size:15px}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);
+  padding:8px 16px;border-radius:999px;font-size:14px;opacity:0;transition:opacity .2s;pointer-events:none;
+  max-width:calc(100% - 32px);text-align:center;z-index:20}
+.toast.on{opacity:1}
+.hidden{display:none!important}
+
+/* ---------- the report (drawn off-screen, then turned into the image): the Excel sheet's own grid ---------- */
+#report{position:fixed;left:-10000px;top:0;background:#fff;color:#000;padding:16px 20px 20px;
+  font:11px/1.2 Calibri,Carlito,"Segoe UI",Arial,sans-serif}
+#report table{border-collapse:collapse;table-layout:fixed}
+#report td{border:1px solid #000;padding:2px 3px;text-align:center;white-space:nowrap;height:18px;font-weight:700}
+#report td.n{border:0}                       /* empty sheet area, no grid */
+#report td.g{background:#a9d08e}             /* green header / label */
+#report td.b{background:#ddebf7}             /* light blue */
+#report td.h{white-space:normal;line-height:1.15;height:46px}
+#report td.big{font-size:17px}
+#report td.mid{font-size:15px}
+#report td.red{color:#f00}
+#report td.miss{background:#f00}
+#report td.cm{background:#ff0;white-space:normal;font-size:10px}
+#report td.w{font-weight:400}
+#report .ck{display:inline-block;width:11px;height:11px;border:1.3px solid #000;border-radius:2px;vertical-align:middle;
+  position:relative;background:#fff}
+#report .ck.on{background:#000}
+#report .ck.on::after{content:"";position:absolute;left:3px;top:0;width:3px;height:6px;border:solid #fff;border-width:0 1.6px 1.6px 0;transform:rotate(45deg)}
+#report .logo{text-align:left;vertical-align:top;padding:4px 0 0 60px}
+#report .logo img{height:60px;display:block}
+#report .logo span{display:block;font:400 19px/1.1 "Segoe UI",Arial,sans-serif;color:#8c8c8c;letter-spacing:.2px;margin-top:2px}
+#report .ytd{border:2px solid #7f7f7f;background:#f2f2f2;font-size:19px;text-align:left;padding-left:8px}
+#report .ytd b{color:#00b050;margin:0 12px 0 14px}
+#report sup{font-size:.6em}
+</style>
+</head>
+<body>
+<div class="top"><div class="wrap">
+  <div class="title"><h1><img src="logo.png" alt="NCM">Daily Productivity</h1><small id="monthLbl"></small>
+    <button class="gear" id="gearBtn" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></button>
+  </div>
+  <div class="datebar" id="dateBar">
+    <button class="step" id="prevDay" aria-label="Previous day">‹</button>
+    <input type="date" id="day">
+    <button class="step" id="nextDay" aria-label="Next day">›</button>
+  </div>
+</div></div>
+
+<div class="wrap" id="main">
+  <div class="box">
+    <h3>📝 Day's work <span class="st" id="dayState"></span></h3>
+    <div class="field"><label for="trucks">Working trucks</label>
+      <button class="step" data-inc="trucks" data-by="-1">−</button>
+      <input id="trucks" class="num" type="number" inputmode="numeric" min="0" style="text-align:center">
+      <button class="step" data-inc="trucks" data-by="1">+</button></div>
+    <div class="field" style="align-items:flex-start"><label style="padding-top:10px">Plants</label>
+      <div class="plants" id="plants" style="flex:1"></div></div>
+    <div class="field"><label for="prod">Production</label>
+      <input id="prod" class="num" type="number" inputmode="decimal" min="0"><span class="unit">m³</span></div>
+    <div class="field"><label for="comment">Comment</label>
+      <textarea id="comment" rows="1" placeholder="optional"></textarea></div>
+  </div>
+
+  <div class="box">
+    <h3>📲 From WhatsApp <span class="st" id="waState"></span></h3>
+    <p class="hint">Pick the two files you got this morning. The numbers below fill in by themselves; you can still change them.</p>
+    <div class="files">
+      <label class="pick" id="pdfPick"><b>📄 Stock PDF</b><span id="pdfName">Daily Delivery &amp; Stock Report</span>
+        <input type="file" id="pdfFile" accept="application/pdf,.pdf"></label>
+      <label class="pick" id="fuelPick"><b>⛽ Fuel Excel</b><span id="fuelName">استهلاك السولار</span>
+        <input type="file" id="fuelFile" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+    </div>
+    <div class="vals">
+      <div class="v"><span>Cement (SRC) · ton</span><input class="num" id="s_cement" type="number" inputmode="decimal"></div>
+      <div class="v"><span>Sand · ton</span><input class="num" id="s_sand" type="number" inputmode="decimal"></div>
+      <div class="v"><span>Aggregate (1) Ataqa #1 · ton</span><input class="num" id="s_agg1" type="number" inputmode="decimal"></div>
+      <div class="v"><span>Aggregate (2) Ataqa #2 · ton</span><input class="num" id="s_agg2" type="number" inputmode="decimal"></div>
+      <div class="v wide"><span>Fuel of trucks this month · liter</span><input class="num" id="fuel" type="number" inputmode="decimal"></div>
+    </div>
+  </div>
+
+  <div class="box">
+    <h3>🚧 Pumps <span class="st" id="pumpState">…</span></h3>
+    <p class="hint">From the Pump Quantity sheet on Google Drive, every day of the month.</p>
+    <div class="vals" style="margin-top:0">
+      <div class="v"><span>Pumped quantity · m³</span><input class="num" id="pumpQty" type="number" inputmode="decimal"></div>
+      <div class="v"><span>Working pumps</span><input class="num" id="pumpCnt" type="number" inputmode="numeric"></div>
+    </div>
+    <button class="btn ghost" id="pumpReload" style="margin-top:10px">↻ Reload pumps</button>
+  </div>
+
+  <div class="box">
+    <h3>📤 Report</h3>
+    <button class="btn" id="shareBtn">Share report image</button>
+    <div class="preview hidden" id="preview"><img id="previewImg" alt="Report"></div>
+  </div>
+</div>
+
+<div class="wrap hidden" id="settings">
+  <button class="back" id="backBtn">‹ Back</button>
+  <div class="set"><h2>Settings</h2></div>
+  <div class="box">
+    <h3>This month</h3>
+    <div class="field"><label for="ytdBase">YTD before this month</label>
+      <input id="ytdBase" class="num" type="number" inputmode="decimal"><span class="unit">m³</span></div>
+    <div class="field"><label for="nTrucks">Trucks (fleet)</label><input id="nTrucks" class="num" type="number" inputmode="numeric"></div>
+    <div class="field"><label for="nPlants">Plants (fleet)</label><input id="nPlants" class="num" type="number" inputmode="numeric"></div>
+    <div class="field"><label for="nPumps">Pumps (fleet)</label><input id="nPumps" class="num" type="number" inputmode="numeric"></div>
+  </div>
+  <div class="box">
+    <h3>Bring in the Excel sheet</h3>
+    <p class="hint">Pick the month's “Productivity … .xlsx” to load the days already filled in it (and the YTD).</p>
+    <label class="pick"><b>📊 Productivity Excel</b><span id="impName">Productivity November 2026.xlsx</span>
+      <input type="file" id="impFile" accept=".xlsx,.xls"></label>
+  </div>
+  <div class="box">
+    <h3>Saved on this phone</h3>
+    <div id="savedInfo"></div>
+    <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
+  </div>
+</div>
+
+<div id="report"></div>
+<div class="toast" id="toast"></div>
+
+<script src="xlsx.full.min.js"></script>
+<script>
+'use strict';
+const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+const H2C = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+// Pump Quantity 2026.xlsx on Google Drive (shared by link). The Sheets export address is the one a web page may read.
+const PUMP_URL = 'https://docs.google.com/spreadsheets/d/11MNcgcyM98BkZhNE4XQOoEqT9KXbOWcG/export?format=xlsx';
+const PLANTS = ['L1', 'L2', 'V3', 'V4', 'V5'];
+// Stock in tons -> m³ that can still be produced (the sheet's "To be Produced")
+const MATERIALS = [['cement', 'Cement', 0.45], ['sand', 'Sand', 0.85], ['agg1', 'Aggregate (1)', 0.75], ['agg2', 'Aggregate (2)', 0.46]];
+const DEFAULTS = {nTrucks: 25, nPlants: 4, nPumps: 8};
+
+const $ = s => document.querySelector(s);
+const fmt = (v, dec = 0) => v == null || !isFinite(v) ? '' : v.toLocaleString('en-US', {minimumFractionDigits: dec, maximumFractionDigits: dec});
+const num = v => { if (v == null || v === '') return null; const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/,/g, '')); return isFinite(n) ? n : null; };
+const pad = n => String(n).padStart(2, '0');
+const iso = d => d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+const monthKey = day => day.slice(0, 7);
+const daysIn = mk => new Date(+mk.slice(0, 4), +mk.slice(5, 7), 0).getDate();
+function toast(msg, ms = 2200) { const t = $('#toast'); t.textContent = msg; t.classList.add('on'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('on'), ms); }
+function loadScript(src) { return new Promise((ok, no) => { const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => no(new Error('Could not load ' + src)); document.head.appendChild(s); }); }
+
+/* ---------- saved data: one record per month, on this phone ---------- */
+const store = {
+  get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { toast('Could not save on this phone'); } }
+};
+// In the morning you report yesterday's work, so the app opens on yesterday
+let DAY = iso(new Date(Date.now() - 864e5)), M = null;
+function loadMonth(mk) {
+  let m = store.get('dp-' + mk);
+  if (!m) {
+    // a new month starts its YTD where last month ended
+    const [y, mo] = mk.split('-').map(Number), prev = store.get('dp-' + iso(new Date(y, mo - 2, 1)).slice(0, 7));
+    m = {days: {}, stock: {}, fuel: null, ytdBase: prev && prev.ytdBase != null ? prev.ytdBase + mtd(prev) : null, ...DEFAULTS};
+    if (prev) Object.assign(m, {nTrucks: prev.nTrucks, nPlants: prev.nPlants, nPumps: prev.nPumps});
+  }
+  return m;
+}
+const save = () => store.set('dp-' + monthKey(DAY), M);
+const dayRec = d => M.days[d] || (M.days[d] = {});
+const mtd = m => Object.values(m.days).reduce((s, r) => s + (num(r.prod) || 0), 0);
+
+/* ---------- form ---------- */
+$('#plants').innerHTML = PLANTS.map((p, i) => `<button class="pl" data-p="${i}">${p}</button>`).join('');
+function render() {
+  const mk = monthKey(DAY);
+  if (!M || M._mk !== mk) { M = loadMonth(mk); Object.defineProperty(M, '_mk', {value: mk, enumerable: false}); }
+  $('#day').value = DAY;
+  $('#monthLbl').textContent = new Date(DAY + 'T00:00').toLocaleDateString('en-GB', {weekday: 'long'});
+  const r = M.days[DAY] || {};
+  $('#trucks').value = r.trucks ?? '';
+  $('#prod').value = r.prod ?? '';
+  $('#comment').value = r.comment || '';
+  document.querySelectorAll('.pl').forEach(b => b.classList.toggle('on', !!(r.plants || [])[+b.dataset.p]));
+  $('#pumpQty').value = r.pump ?? ''; $('#pumpCnt').value = r.pumps ?? '';
+  for (const [k] of MATERIALS) $('#s_' + k).value = M.stock[k] ?? '';
+  $('#fuel').value = M.fuel ?? '';
+  const done = r.trucks != null && r.prod != null;
+  $('#dayState').textContent = done ? '✓ saved' : 'not filled yet'; $('#dayState').className = 'st ' + (done ? 'ok' : '');
+  $('#ytdBase').value = M.ytdBase ?? ''; $('#nTrucks').value = M.nTrucks; $('#nPlants').value = M.nPlants; $('#nPumps').value = M.nPumps;
+  const filled = Object.keys(M.days).filter(d => M.days[d].prod != null).sort();
+  $('#savedInfo').innerHTML = `<div class="kv"><span>Days with production</span><b class="num">${filled.length}</b></div>
+    <div class="kv"><span>MTD production</span><b class="num">${fmt(mtd(M))} m³</b></div>
+    <div class="kv"><span>YTD</span><b class="num">${M.ytdBase == null ? '— set it above' : fmt(M.ytdBase + mtd(M)) + ' m³'}</b></div>`;
+  $('#preview').classList.add('hidden');
+}
+function setDay(d) { DAY = d; render(); }
+$('#day').onchange = e => e.target.value && setDay(e.target.value);
+const shift = n => { const d = new Date(DAY + 'T00:00'); d.setDate(d.getDate() + n); setDay(iso(d)); };
+$('#prevDay').onclick = () => shift(-1); $('#nextDay').onclick = () => shift(1);
+const onNum = (id, fn) => $(id).addEventListener('input', e => { fn(num(e.target.value)); save(); $('#preview').classList.add('hidden'); });
+onNum('#trucks', v => dayRec(DAY).trucks = v);
+onNum('#prod', v => dayRec(DAY).prod = v);
+onNum('#pumpQty', v => dayRec(DAY).pump = v);
+onNum('#pumpCnt', v => dayRec(DAY).pumps = v);
+onNum('#fuel', v => M.fuel = v);
+onNum('#ytdBase', v => M.ytdBase = v);
+for (const k of ['nTrucks', 'nPlants', 'nPumps']) onNum('#' + k, v => M[k] = v || DEFAULTS[k]);
+for (const [k] of MATERIALS) onNum('#s_' + k, v => M.stock[k] = v);
+$('#comment').addEventListener('input', e => { dayRec(DAY).comment = e.target.value; save(); });
+document.querySelectorAll('[data-inc]').forEach(b => b.onclick = () => {
+  const r = dayRec(DAY); r.trucks = Math.max(0, (num(r.trucks) ?? lastTrucks()) + +b.dataset.by); save(); render();
+});
+const lastTrucks = () => { const d = Object.keys(M.days).filter(k => k < DAY && M.days[k].trucks != null).sort().pop(); return d ? M.days[d].trucks : 0; };
+document.querySelectorAll('.pl').forEach(b => b.onclick = () => {
+  const r = dayRec(DAY); r.plants = PLANTS.map((_, i) => !!(r.plants || [])[i]); r.plants[+b.dataset.p] = !r.plants[+b.dataset.p]; save(); render();
+});
+$('#gearBtn').onclick = () => { $('#main').classList.add('hidden'); $('#dateBar').classList.add('hidden'); $('#settings').classList.remove('hidden'); };
+$('#backBtn').onclick = () => { $('#settings').classList.add('hidden'); $('#main').classList.remove('hidden'); $('#dateBar').classList.remove('hidden'); render(); };
+$('#clearDay').onclick = () => { if (confirm('Clear everything typed for ' + DAY + '?')) { delete M.days[DAY]; save(); render(); toast('Cleared'); } };
+
+/* ---------- stock PDF: the number right under each column title ---------- */
+async function readStockPdf(buf) {
+  if (!window.pdfjsLib) { await loadScript(PDFJS + 'pdf.min.js'); pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js'; }
+  const pdf = await pdfjsLib.getDocument({data: buf}).promise, found = {};
+  for (let p = 1; p <= pdf.numPages; p++) {
+    const items = (await (await pdf.getPage(p)).getTextContent()).items
+      .filter(i => i.str.trim()).map(i => ({s: i.str.trim(), x0: i.transform[4], x1: i.transform[4] + i.width, y: i.transform[5]}));
+    // join words on the same line into phrases ("Ataqa _Size # 1"); columns are far apart, words are close
+    const phrases = [];
+    for (const it of [...items].sort((a, b) => b.y - a.y || a.x0 - b.x0)) {
+      const last = phrases[phrases.length - 1];
+      if (last && Math.abs(last.y - it.y) < 2 && it.x0 - last.x1 < 7) { last.s += ' ' + it.s; last.x1 = it.x1; }
+      else phrases.push({...it});
+    }
+    const numbers = items.filter(i => /^[\d,]+(\.\d+)?$/.test(i.s));
+    for (const ph of phrases) {
+      const t = ph.s.replace(/_/g, ' ').replace(/\s+/g, ' ');
+      const key = /\bSand\b/i.test(t) ? 'sand' : /^SRC$/i.test(t) ? 'cement'      // cement = SRC, not Cem III
+        : /Ataqa.*#\s*1\b/i.test(t) ? 'agg1' : /Ataqa.*#\s*2\b/i.test(t) ? 'agg2' : null;
+      if (!key || key in found) continue;
+      // highest number below the title inside the same column = "QT by Tons" (SRC is one merged cell)
+      const below = numbers.filter(n => n.y < ph.y - 2 && (n.x0 + n.x1) / 2 > ph.x0 - 12 && (n.x0 + n.x1) / 2 < ph.x1 + 12)
+        .sort((a, b) => b.y - a.y);
+      if (below.length) found[key] = num(below[0].s);
+    }
+  }
+  return found;
+}
+$('#pdfFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $('#pdfName').textContent = 'Reading…';
+  try {
+    const s = await readStockPdf(await f.arrayBuffer());
+    const missing = MATERIALS.filter(([k]) => s[k] == null).map(m => m[1]);
+    Object.assign(M.stock, s); save(); render();
+    $('#pdfPick').classList.add('done'); $('#pdfName').textContent = f.name;
+    toast(missing.length ? 'Not found in the PDF: ' + missing.join(', ') : 'Stock filled from the PDF');
+  } catch (err) { $('#pdfName').textContent = 'Could not read it'; toast(err.message); }
+  e.target.value = '';
+};
+
+/* ---------- fuel Excel: all mixer (TM) fuel this month ---------- */
+function readFuel(wb, mk) {
+  for (const name of wb.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header: 1, raw: true});
+    const h = (rows[0] || []).map(v => String(v ?? '').trim());
+    const cDate = h.indexOf('التاريخ'), cType = h.indexOf('TYPE'), cQty = h.indexOf('كمية السولار');
+    if (cDate < 0 || cType < 0 || cQty < 0) continue;
+    let total = 0, n = 0;
+    for (const r of rows.slice(1)) {
+      const d = r[cDate];
+      if (!(d instanceof Date) || iso(d).slice(0, 7) !== mk || String(r[cType]).trim() !== 'TM') continue;
+      total += num(r[cQty]) || 0; n++;
+    }
+    return {total, n};
+  }
+  throw new Error('This is not the fuel sheet (no “كمية السولار” column)');
+}
+$('#fuelFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  $('#fuelName').textContent = 'Reading…';
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), {type: 'array', cellDates: true, dense: true});
+    const {total, n} = readFuel(wb, monthKey(DAY));
+    M.fuel = total; save(); render();
+    $('#fuelPick').classList.add('done'); $('#fuelName').textContent = f.name;
+    toast(n ? `Fuel: ${fmt(total)} L from ${n} mixer refills` : 'No mixer fuel for this month in that file');
+  } catch (err) { $('#fuelName').textContent = 'Could not read it'; toast(err.message); }
+  e.target.value = '';
+};
+
+/* ---------- pumps from Google Drive ---------- */
+async function loadPumps(quiet) {
+  $('#pumpState').textContent = 'loading…'; $('#pumpState').className = 'st';
+  try {
+    const res = await fetch(PUMP_URL, {cache: 'no-store'});
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const wb = XLSX.read(await res.arrayBuffer(), {type: 'array', cellDates: true, dense: true});
+    const mk = monthKey(DAY); let days = 0;
+    for (const name of wb.SheetNames) {
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header: 1, raw: true});
+      if (!(rows[1] && rows[1][0] instanceof Date) || iso(rows[1][0]).slice(0, 7) !== mk) continue;
+      const tc = (rows[0] || []).findIndex(v => String(v ?? '').trim().toLowerCase() === 'total day');
+      if (tc < 0) continue;
+      for (const r of rows.slice(1)) {
+        if (!(r[0] instanceof Date)) continue;
+        const d = iso(r[0]), q = num(r[tc]), c = num(r[tc + 1]);
+        if (q) { const rec = dayRec(d); rec.pump = q; if (c) rec.pumps = c; days++; }
+      }
+      break;
+    }
+    save(); render();
+    const today = M.days[DAY] || {};
+    $('#pumpState').textContent = today.pump ? '✓ from Drive' : days ? `no pumps yet for this day (${days} days in sheet)` : 'no sheet for this month';
+    $('#pumpState').className = 'st ' + (today.pump ? 'ok' : 'bad');
+    if (!quiet) toast('Pumps updated');
+  } catch (err) {
+    $('#pumpState').textContent = 'offline: type them'; $('#pumpState').className = 'st bad';
+    if (!quiet) toast('Could not reach the pump sheet: ' + err.message);
+  }
+}
+$('#pumpReload').onclick = () => loadPumps(false);
+
+/* ---------- import the month's Productivity Excel ---------- */
+$('#impFile').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try {
+    const wb = XLSX.read(await f.arrayBuffer(), {type: 'array', cellDates: true, cellFormula: true});
+    const ws = wb.Sheets['Trucks & Plants'] || wb.Sheets[wb.SheetNames[0]];
+    const v = a => ws[a] ? ws[a].v : null;
+    let n = 0, mk = null;
+    for (let r = 6; r <= 36; r++) {
+      const d = v('B' + r); if (!(d instanceof Date)) continue;
+      const day = iso(d); mk = mk || monthKey(day);
+      if (monthKey(day) !== monthKey(DAY)) continue;
+      const rec = {trucks: num(v('C' + r)), plants: 'DEFGH'.split('').map(c => v(c + r) === true),
+        prod: num(v('I' + r)), pump: num(v('Q' + r)), pumps: num(v('R' + r)), comment: v('T' + r) || ''};
+      if (rec.trucks == null && rec.prod == null && rec.pump == null) continue;
+      M.days[day] = rec; n++;
+    }
+    if (mk && mk !== monthKey(DAY)) throw new Error('That file is for ' + mk + '. Pick a day in that month first.');
+    const base = ws.P2 && ws.P2.f && ws.P2.f.match(/^(\d+(?:\.\d+)?)\s*\+/); if (base) M.ytdBase = +base[1];
+    MATERIALS.forEach(([k], i) => { const x = num(v('J' + (41 + i))); if (x != null) M.stock[k] = x; });
+    if (num(v('X5')) != null) M.fuel = num(v('X5'));
+    save(); render(); $('#impName').textContent = f.name; toast(`Loaded ${n} days from the Excel`);
+  } catch (err) { toast(err.message, 3500); }
+  e.target.value = '';
+};
+
+/* ---------- the report image (same layout as the Excel sheet) ---------- */
+// Column widths of the sheet, B..T
+const COLS = [115, 55, 31, 31, 31, 31, 31, 97, 75, 92, 70, 62, 85, 75, 90, 80, 80, 78, 275];
+function buildReport() {
+  // the days from the 1st up to the selected day (the image grows by one row every morning)
+  const mk = monthKey(DAY), last = +DAY.slice(8), T = M.nTrucks, P = M.nPlants;
+  const rows = [], avg = {c: [], j: [], l: [], n: [], o: [], p: [], r: [], s: []};
+  const work = PLANTS.map(() => 0);
+  let mtdP = 0, pumpSum = 0;
+  const td = (v, cls = '', dec = 0) => `<td class="${cls}">${typeof v === 'number' ? fmt(v, dec) : v ?? ''}</td>`;
+  const red = (cls, v, lim) => cls + (v != null && v < lim ? ' red' : '');
+  for (let i = 1; i <= last; i++) {
+    const d = mk + '-' + pad(i), r = M.days[d] || {}, I = num(r.prod), C = num(r.trucks);
+    const pl = PLANTS.map((_, k) => !!(r.plants || [])[k]); pl.forEach((on, k) => on && work[k]++);
+    const has = I != null, np = pl.filter(Boolean).length || null;
+    const J = has && C ? I / C * 30 : null, K = has && C ? I / C / 12 : null, L = has ? I / T * 30 : null, Mm = has ? I / T / 12 : null;
+    const O = has && np ? I / np : null, Pp = has ? I / P : null, Q = num(r.pump), R = num(r.pumps), S = Q && R ? Q / R : null;
+    if (has) mtdP += I; pumpSum += Q || 0;
+    if (C != null) avg.c.push(C); if (J != null) avg.j.push(J); if (L != null) avg.l.push(L);
+    if (has && np) avg.n.push(np); if (O != null) avg.o.push(O); if (Pp != null) avg.p.push(Pp); if (R) avg.r.push(R); if (S != null) avg.s.push(S);
+    const pump = Q ? 'b' : 'miss';                 // the sheet paints missing pump numbers red
+    rows.push(`<tr>${td(new Date(d + 'T00:00').toLocaleDateString('en-GB', {day: 'numeric', month: 'short'}).replace(' ', '-'), 'g')}
+      ${td(C, 'w')}${pl.map(on => `<td><span class="ck${on ? ' on' : ''}"></span></td>`).join('')}${td(I, 'w')}
+      ${td(J, red('b', J, 1500))}${td(K, red('b', K, 4.5))}${td(L, red('b', L, 1500))}${td(Mm, red('b', Mm, 4.5))}
+      ${td(has ? np : null, 'w')}${td(O, red('', O, 400))}${td(Pp, red('', Pp, 400))}
+      ${td(Q, pump)}${td(R, pump)}${td(S, pump)}
+      ${td((r.comment || '').replace(/[<&]/g, c => c === '<' ? '&lt;' : '&amp;'), r.comment ? 'cm' : '')}</tr>`);
+  }
+  const A = a => a.length ? a.reduce((x, y) => x + y, 0) / a.length : null;
+  const ytd = M.ytdBase != null ? M.ytdBase + mtdP : null;
+  const n = k => `<td class="n" colspan="${k}"></td>`;
+  $('#report').innerHTML = `<table style="width:${COLS.reduce((a, b) => a + b)}px">
+    <colgroup>${COLS.map(w => `<col style="width:${w}px">`).join('')}</colgroup>
+    <tr><td class="n logo" colspan="8" rowspan="3"><img src="logo.png" alt=""><span>NUCLEAR CONCRETE MIXES</span></td>
+      ${n(4)}<td class="ytd" colspan="4">YTD Production :<b>${fmt(ytd)}</b>m<sup>3</sup></td>${n(3)}</tr>
+    <tr><td class="big" colspan="4">Trucks</td><td class="big" colspan="3">Plants</td><td class="big" colspan="3" rowspan="2">Pumps</td>${n(1)}</tr>
+    <tr><td class="g big" colspan="2">Actual</td><td class="g big" colspan="2">(${T} Trucks)</td>
+      <td class="g big" colspan="2">Actual</td><td class="g big">${P} Plants</td>${n(1)}</tr>
+    <tr>${['Date', 'Working Trucks', ...PLANTS, 'Production', 'Productivity Per truck', 'Trips for Each Truck', 'Productivity Per truck',
+      'Trips for Each Truck', 'Number Of Working Plants', 'Productivity Per Plant', 'Productivity Per Plant', 'Pumped Quantity',
+      'Number of Working Pumps', 'Productivity for Workimg Pump Per Day'].map(h => td(h, 'g h')).join('')}<td class="g h mid">Comment</td></tr>
+    ${rows.join('')}
+    <tr style="height:26px">${td('Averages', 'g')}${td(A(avg.c), 'g mid')}${n(6)}${td(A(avg.j), red('g mid', A(avg.j), 1500))}${n(1)}
+      ${td(A(avg.l), red('g mid', A(avg.l), 1500))}${n(1)}${td(A(avg.n), 'g mid')}${td(A(avg.o), 'g mid')}${td(A(avg.p), 'g mid')}
+      ${td('')}${td(A(avg.r), 'g mid')}${td(A(avg.s), 'g mid')}${n(1)}</tr>
+    <tr>${td('Consumption for Trucks (L/m<sup>3</sup>)', 'b h')}${td(mtdP && M.fuel != null ? M.fuel / mtdP : null, 'b', 2)}${n(2)}
+      <td class="b" colspan="3">MTD Production</td>${td(mtdP, 'big')}${n(7)}<td class="b" colspan="2">Productivity For ${M.nPumps} Pumps</td>
+      ${td(pumpSum / M.nPumps, 'big')}${n(1)}</tr>
+    <tr><td class="g h" colspan="2">Working Days for Each Plant in the month</td>${work.map(w => td(w, 'g')).join('')}${n(12)}</tr>
+    <tr>${n(7)}${td('Materials', 'b h')}${td('Current Stock (TON )', 'b h')}${td('To be Produced (m<sup>3</sup>)', 'b h')}${n(9)}</tr>
+    ${MATERIALS.map(([k, nm, f]) => `<tr style="height:25px">${n(7)}${td(nm, 'mid w')}${td(M.stock[k], 'mid')}
+      ${td(M.stock[k] != null ? M.stock[k] / f : null, 'mid')}${n(9)}</tr>`).join('')}
+  </table>`;
+}
+async function reportBlob() {
+  if (!window.html2canvas) await loadScript(H2C);
+  buildReport();
+  await Promise.all([...$('#report').querySelectorAll('img')].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
+  const canvas = await html2canvas($('#report'), {scale: 1.5, backgroundColor: '#ffffff', logging: false});
+  return new Promise(r => canvas.toBlob(r, 'image/png'));
+}
+$('#shareBtn').onclick = async () => {
+  const b = $('#shareBtn'); b.disabled = true; b.textContent = 'Making the image…';
+  try {
+    const blob = await reportBlob(), name = `Productivity ${DAY}.png`;
+    $('#previewImg').src = URL.createObjectURL(blob); $('#preview').classList.remove('hidden');
+    const file = new File([blob], name, {type: 'image/png'});
+    if (navigator.canShare && navigator.canShare({files: [file]})) {
+      try { await navigator.share({files: [file], title: 'Daily Productivity ' + DAY}); }
+      catch (err) { if (err.name !== 'AbortError') throw err; }
+    } else {
+      const a = document.createElement('a'); a.href = $('#previewImg').src; a.download = name; a.click();
+      toast('Image saved. Send it from your gallery / downloads');
+    }
+  } catch (err) { toast('Could not make the image: ' + err.message, 3500); }
+  b.disabled = false; b.textContent = 'Share report image';
+};
+
+render();
+loadPumps(true);
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
