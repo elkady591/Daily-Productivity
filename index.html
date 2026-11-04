@@ -1060,7 +1060,8 @@ async function reportBlob() {
   await Promise.all(['400 16px "ADLaM Display"', '400 16px Carlito', '700 16px Carlito', '400 16px "Archivo Black"', '600 16px Barlow']
     .map(f => document.fonts.load(f).catch(() => null)));
   await Promise.all([...$('#report').querySelectorAll('img')].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
-  const canvas = await html2canvas($('#report'), {scale: 1, backgroundColor: '#ffffff', logging: false});
+  // drawn at 2× so the text stays sharp when the picture is zoomed or sent on WhatsApp
+  const canvas = await html2canvas($('#report'), {scale: 2, backgroundColor: '#ffffff', logging: false});
   return new Promise(r => canvas.toBlob(r, 'image/png'));
 }
 // The image is made once and reused by Open / Share / Copy until something in the month changes
