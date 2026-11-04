@@ -1,4 +1,4 @@
-// Bump VERSION on every change so phones pick up the new files (and the number at the bottom of ⚙ in index.html).
+// Bump VERSION on every change so phones pick up the new files.
 const VERSION = 'daily-productivity-v12';
 const FILES = ['./', 'index.html', 'manifest.json', 'xlsx.full.min.js', 'template.xlsx', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'logo.png'];
 

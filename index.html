@@ -37,9 +37,8 @@ button{font:inherit;color:inherit;cursor:pointer}
 .title{display:flex;align-items:center;gap:8px}
 .title h1{font-size:19px;margin:0;display:flex;align-items:center;gap:7px;white-space:nowrap}
 .title h1 img{height:30px;width:auto;display:block}
-.title .sp{flex:1}
+.title small{color:var(--muted);font-size:12px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media (max-width:420px){ .title h1{font-size:17px;gap:5px} .title h1 img{height:24px} .gear{width:36px} }
-@media (max-width:380px){ .title{gap:4px} .title h1{font-size:15px;gap:4px} .title h1 img{height:21px} .gear{width:32px} .dayBox{font-size:16px} .dayBox .wd{margin-right:6px} }
 .gear{flex:none;width:40px;height:40px;display:grid;place-items:center;border:0;background:none;color:var(--muted);border-radius:10px;padding:0}
 .gear:active{background:var(--chip)}
 .gear.sync{font-size:21px}
@@ -48,7 +47,6 @@ button{font:inherit;color:inherit;cursor:pointer}
 .datebar{display:flex;align-items:center;gap:6px;margin-top:8px}
 .dayBox{flex:1;min-width:0;position:relative;display:flex;align-items:center;justify-content:center;height:44px;
   font-size:18px;font-weight:700;border-radius:10px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)}
-.dayBox .wd{color:var(--muted);font-weight:600;margin-right:8px;white-space:nowrap}
 .dayBox input{position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;cursor:pointer}
 .datebar .step{width:44px;height:44px}
 
@@ -104,15 +102,11 @@ button{font:inherit;color:inherit;cursor:pointer}
 #report .cell{position:absolute;display:flex;box-sizing:border-box;padding:1px 4px;line-height:1.3}
 #report .ln{position:absolute;box-sizing:border-box;z-index:2}
 #report .logo{position:absolute;display:block}
-#report .ck{display:inline-block;width:13px;height:13px;border:1.5px solid #000;border-radius:2px;vertical-align:middle;
-  position:relative;background:#fff;box-sizing:border-box}
-#report .ck.on{background:#000}
-#report .ck.on::after{content:"";position:absolute;left:3.5px;top:0.5px;width:3px;height:6.5px;border:solid #fff;border-width:0 1.7px 1.7px 0;transform:rotate(45deg)}
 </style>
 </head>
 <body>
 <div class="top"><div class="wrap">
-  <div class="title"><h1><img src="logo.png" alt="NCM">Daily Productivity</h1><span class="sp"></span>
+  <div class="title"><h1><img src="logo.png" alt="NCM">Daily Productivity</h1><small id="monthLbl"></small>
     <button class="gear sync" id="syncBtn" aria-label="Online save" data-s="none">☁</button>
     <button class="gear" id="gearBtn" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"
       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/>
@@ -121,7 +115,7 @@ button{font:inherit;color:inherit;cursor:pointer}
   <div class="datebar" id="dateBar">
     <button class="step" id="prevDay" aria-label="Previous day">‹</button>
     <!-- the phone's own calendar opens on tap, but the box always reads day-month-year -->
-    <label class="dayBox"><span id="monthLbl" class="wd"></span><span id="dayTxt" class="num"></span><input type="date" id="day" aria-label="Day"></label>
+    <label class="dayBox"><span id="dayTxt" class="num"></span><input type="date" id="day" aria-label="Day"></label>
     <button class="step" id="nextDay" aria-label="Next day">›</button>
   </div>
 </div></div>
@@ -220,7 +214,6 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 12 · 4-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -965,6 +958,10 @@ function xlNumber(v, code) {
   if (c === 'General') return Number.isInteger(v) ? String(v) : String(+v.toFixed(2));
   return (pct ? v * 100 : v).toLocaleString('en-US', {minimumFractionDigits: dec, maximumFractionDigits: dec, useGrouping: c.includes(',')}) + (pct ? '%' : '');
 }
+// Excel's checkbox, drawn as a shape so it stays sharp at any size (CSS boxes came out smudged)
+const checkbox = on => `<svg width="15" height="15" viewBox="0 0 15 15" style="display:block">`
+  + `<rect x="1" y="1" width="13" height="13" rx="2" fill="${on ? '#000' : '#fff'}" stroke="#000" stroke-width="1.6"/>`
+  + (on ? `<path d="M4 7.6 6.4 10 11 4.8" fill="none" stroke="#fff" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/>` : '') + '</svg>';
 async function buildReport() {
   const S = await sheetLook(), {V, lastRow} = reportValues(S.fleet), C1 = 2, C2 = 20;            // columns B..T, like the picture you send
   const shown = []; for (let r = 1; r <= 44; r++) if (r < FIRST_XL_ROW || (r <= lastRow) || r > LAST_XL_ROW) shown.push(r);
@@ -1009,7 +1006,7 @@ async function buildReport() {
         if (hit) { fill = rule.dxf.fill || fill; color = rule.dxf.color || color; }
       }
       let content = '', h = x.h;
-      if (typeof v === 'boolean') { content = `<span class="ck${v ? ' on' : ''}"></span>`; h = h || 'center'; }
+      if (typeof v === 'boolean') { content = checkbox(v); h = h || 'center'; }
       else if (typeof v === 'number') { content = esc(xlNumber(v, x.fmt)); h = h || 'right'; }
       else if (Array.isArray(v)) content = v.map(p => run(p.t, p.f)).join('');
       else if (v && v.comment) { content = commentHtml(v.comment); fill = '#ffff00'; }   // a comment is highlighted yellow, as you do in the sheet
@@ -1061,7 +1058,7 @@ async function reportBlob() {
   await Promise.all(['400 16px "ADLaM Display"', '400 16px Carlito', '700 16px Carlito', '400 16px "Archivo Black"', '600 16px Barlow']
     .map(f => document.fonts.load(f).catch(() => null)));
   await Promise.all([...$('#report').querySelectorAll('img')].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
-  // drawn at 2× so the text stays sharp when the picture is zoomed or sent on WhatsApp
+  // twice the sheet's own size, so the small text stays sharp after WhatsApp shrinks the picture
   const canvas = await html2canvas($('#report'), {scale: 2, backgroundColor: '#ffffff', logging: false});
   return new Promise(r => canvas.toBlob(r, 'image/png'));
 }
