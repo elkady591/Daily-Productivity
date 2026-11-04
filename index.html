@@ -37,8 +37,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 .title{display:flex;align-items:center;gap:8px}
 .title h1{font-size:19px;margin:0;display:flex;align-items:center;gap:7px;white-space:nowrap}
 .title h1 img{height:30px;width:auto;display:block}
-.title small{color:var(--muted);font-size:12px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.title .sp{flex:1}
 @media (max-width:420px){ .title h1{font-size:17px;gap:5px} .title h1 img{height:24px} .gear{width:36px} }
+@media (max-width:380px){ .title{gap:4px} .title h1{font-size:15px;gap:4px} .title h1 img{height:21px} .gear{width:32px} .dayBox{font-size:16px} .dayBox .wd{margin-right:6px} }
 .gear{flex:none;width:40px;height:40px;display:grid;place-items:center;border:0;background:none;color:var(--muted);border-radius:10px;padding:0}
 .gear:active{background:var(--chip)}
 .gear.sync{font-size:21px}
@@ -47,6 +48,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 .datebar{display:flex;align-items:center;gap:6px;margin-top:8px}
 .dayBox{flex:1;min-width:0;position:relative;display:flex;align-items:center;justify-content:center;height:44px;
   font-size:18px;font-weight:700;border-radius:10px;border:1.5px solid var(--line);background:var(--card);color:var(--ink)}
+.dayBox .wd{color:var(--muted);font-weight:600;margin-right:8px;white-space:nowrap}
 .dayBox input{position:absolute;inset:0;width:100%;height:100%;opacity:0;border:0;cursor:pointer}
 .datebar .step{width:44px;height:44px}
 
@@ -106,7 +108,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 </head>
 <body>
 <div class="top"><div class="wrap">
-  <div class="title"><h1><img src="logo.png" alt="NCM">Daily Productivity</h1><small id="monthLbl"></small>
+  <div class="title"><h1><img src="logo.png" alt="NCM">Daily Productivity</h1><span class="sp"></span>
     <button class="gear sync" id="syncBtn" aria-label="Online save" data-s="none">☁</button>
     <button class="gear" id="gearBtn" aria-label="Settings"><svg viewBox="0 0 24 24" width="22" height="22" fill="none"
       stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/>
@@ -115,7 +117,7 @@ button{font:inherit;color:inherit;cursor:pointer}
   <div class="datebar" id="dateBar">
     <button class="step" id="prevDay" aria-label="Previous day">‹</button>
     <!-- the phone's own calendar opens on tap, but the box always reads day-month-year -->
-    <label class="dayBox"><span id="dayTxt" class="num"></span><input type="date" id="day" aria-label="Day"></label>
+    <label class="dayBox"><span id="monthLbl" class="wd"></span><span id="dayTxt" class="num"></span><input type="date" id="day" aria-label="Day"></label>
     <button class="step" id="nextDay" aria-label="Next day">›</button>
   </div>
 </div></div>
@@ -214,6 +216,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 13 · 4-11-2026</p>
 </div>
 
 <div id="report"></div>
