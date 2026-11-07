@@ -216,7 +216,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 13 · 4-11-2026</p>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 14 · 7-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -259,7 +259,18 @@ function loadMonth(mk) {
   }
   return m;
 }
-const save = () => store.set('dp-' + monthKey(DAY), M);
+// Another copy of the app on this phone (a second tab, the app opened inside another app) can have saved
+// newer days meanwhile: take those first, so an old copy left open never writes its empty days over them.
+function mergeStored() {
+  const s = M && store.get('dp-' + M._mk); if (!s) return false;
+  let changed = false;
+  for (const [d, r] of Object.entries(s.days || {})) {
+    const l = M.days[d]; if (!l || (r.t || 0) > (l.t || 0)) { M.days[d] = r; changed = true; }
+  }
+  if ((s.t || 0) > (M.t || 0)) { for (const k of META_KEYS) M[k] = s[k]; M.t = s.t; changed = true; }
+  return changed;
+}
+const save = () => { mergeStored(); store.set('dp-' + M._mk, M); };
 
 /* ---------- online save ----------
    Each day ("d|2026-11-02") and each month's settings ("m|2026-11": stock, fuel, YTD, fleet) is one record
@@ -281,8 +292,10 @@ async function unseal(c) {
   const all = unb64(c);
   return JSON.parse(dec.decode(await crypto.subtle.decrypt({name: 'AES-GCM', iv: all.slice(0, 12)}, await aes(), all.slice(12))));
 }
-async function api(body) {
-  const res = await fetch(SYNC_URL, {method: 'POST', body: JSON.stringify(body)});   // text/plain: no CORS preflight
+async function api(body, keepalive) {
+  const text = JSON.stringify(body);
+  // keepalive lets the save finish after the app is closed (browsers allow it for small requests only)
+  const res = await fetch(SYNC_URL, {method: 'POST', body: text, keepalive: !!keepalive && text.length < 60000});   // text/plain: no CORS preflight
   const j = await res.json();
   if (!j.ok) throw Object.assign(new Error(j.err || 'error'), {code: j.err});
   return j;
@@ -302,18 +315,25 @@ function syncFail(err) {
 const monthData = mk => M && M._mk === mk ? M : store.get('dp-' + mk);
 const recOf = k => { const m = monthData(k.slice(2, 9)); if (!m) return null;
   return k[0] === 'd' ? (m.days || {})[k.slice(2)] : {...Object.fromEntries(META_KEYS.map(x => [x, m[x]])), t: m.t}; };
-function queue(k) { dirty.add(k); store.set('dp-dirty', [...dirty]); clearTimeout(queue.h); queue.h = setTimeout(push, 1500); }
+// the list of records still to send is shared with any other copy of the app on this phone
+const storeDirty = done => {
+  const all = new Set([...(store.get('dp-dirty') || []), ...dirty]); (done || []).forEach(k => all.delete(k));
+  store.set('dp-dirty', [...all]);
+};
+function queue(k) { dirty.add(k); storeDirty(); clearTimeout(queue.h); queue.h = setTimeout(push, 1500); }
 function touchDay(d) { dayRec(d).t = Date.now(); queue('d|' + d); }
 function touchMeta() { M.t = Date.now(); queue('m|' + monthKey(DAY)); }
-async function push() {
+async function push(leaving) {
+  (store.get('dp-dirty') || []).forEach(k => dirty.add(k));
   if (!SY || !dirty.size || push.busy) return;
   push.busy = true; syncState('busy', 'Saving…');
   try {
     const w = [];
     for (const k of dirty) { const r = recOf(k); if (r && r.t) w.push({k, v: {t: r.t, c: await seal(r)}}); else dirty.delete(k); }
-    if (w.length) await api({a: 'put', tok: SY.tok, w});
-    for (const x of w) { const r = recOf(x.k); if (!r || r.t === x.v.t) dirty.delete(x.k); }   // changed again meanwhile: keep it
-    store.set('dp-dirty', [...dirty]);
+    if (w.length) await api({a: 'put', tok: SY.tok, w}, leaving);
+    const done = [];
+    for (const x of w) { const r = recOf(x.k); if (!r || r.t === x.v.t) { dirty.delete(x.k); done.push(x.k); } }   // changed again meanwhile: keep it
+    storeDirty(done);
     syncState('ok', 'Saved online · ' + new Date().toLocaleTimeString('en-GB', {hour: '2-digit', minute: '2-digit'}));
   } catch (err) { syncFail(err); }
   push.busy = false;
@@ -440,8 +460,7 @@ $('#syncOff').onclick = () => {
   SY = null; AES = null; try { localStorage.removeItem('dp-sync'); } catch {}
   syncState('none', 'Not connected'); openSettings();
 };
-// back on the app, or back online: get the other devices' changes and send ours
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && SY) pull().then(push); });
+// back online: send what is waiting
 addEventListener('online', () => SY && push());
 
 /* ---------- stock PDF: the number right under each column title ---------- */
@@ -1104,7 +1123,16 @@ $('#previewImg').onclick = () => $('#openBtn').click();
 syncState(SY ? 'busy' : 'none', SY ? 'Loading…' : 'Not connected');
 render();
 // pumps after the online copy is in, so they update the newest version of each day
-(PULL || Promise.resolve()).then(() => loadPumps(true)).then(push);
+(PULL || Promise.resolve()).then(() => loadPumps(true)).then(() => push());
+// Leaving the app: send what is waiting now, before the phone puts the app to sleep.
+// Coming back: show what was saved meanwhile here or on another device.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') { clearTimeout(queue.h); push(true); return; }
+  if (mergeStored()) render(true);
+  if (SY) pull().then(() => push());
+});
+window.addEventListener('pageshow', e => { if (e.persisted && mergeStored()) render(true); });
+window.addEventListener('storage', e => { if (M && e.key === 'dp-' + M._mk && mergeStored()) render(true); });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
