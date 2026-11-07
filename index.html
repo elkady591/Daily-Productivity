@@ -216,7 +216,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 14 · 7-11-2026</p>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 15 · 7-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -248,8 +248,20 @@ const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { toast('Could not save on this phone'); } }
 };
-// In the morning you report yesterday's work, so the app opens on yesterday
-let DAY = iso(new Date(Date.now() - 864e5)), M = null, PULL = null;
+// The app opens on the last day something was typed for (trucks, plants, production or a comment);
+// with nothing typed yet, on yesterday (in the morning you report yesterday's work)
+const typed = r => !!r && (r.trucks != null || r.prod != null || (r.plants || []).some(Boolean) || !!(r.comment || '').trim());
+function lastTypedDay() {
+  const today = iso(new Date()); let best = null;
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i); if (!/^dp-\d{4}-\d{2}$/.test(k)) continue;
+      for (const [d, r] of Object.entries((store.get(k) || {}).days || {})) if (d <= today && typed(r) && (!best || d > best)) best = d;
+    }
+  } catch {}
+  return best;
+}
+let DAY = lastTypedDay() || iso(new Date(Date.now() - 864e5)), M = null, PULL = null, PICKED = false;
 function loadMonth(mk) {
   let m = store.get('dp-' + mk);
   if (!m) {
@@ -401,7 +413,7 @@ function render(fromPull) {
     <div class="kv"><span>YTD</span><b class="num">${M.ytdBase == null ? '— set it above' : fmt(M.ytdBase + mtd(M)) + ' m³'}</b></div>`;
   $('#preview').classList.add('hidden');
 }
-function setDay(d) { DAY = d; render(); }
+function setDay(d) { DAY = d; PICKED = true; render(); }
 $('#day').onchange = e => e.target.value && setDay(e.target.value);
 // some browsers only open the calendar from its small icon: open it from anywhere in the box
 $('#day').onclick = e => { try { e.target.showPicker(); } catch {} };
@@ -1123,7 +1135,10 @@ $('#previewImg').onclick = () => $('#openBtn').click();
 syncState(SY ? 'busy' : 'none', SY ? 'Loading…' : 'Not connected');
 render();
 // pumps after the online copy is in, so they update the newest version of each day
-(PULL || Promise.resolve()).then(() => loadPumps(true)).then(() => push());
+(PULL || Promise.resolve()).then(() => {
+  // days typed on another device arrive with the online copy: open on the newest one, unless a day was already picked
+  const d = lastTypedDay(); if (!PICKED && d && d > DAY) { DAY = d; render(true); }
+}).then(() => loadPumps(true)).then(() => push());
 // Leaving the app: send what is waiting now, before the phone puts the app to sleep.
 // Coming back: show what was saved meanwhile here or on another device.
 document.addEventListener('visibilitychange', () => {
