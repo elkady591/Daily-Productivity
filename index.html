@@ -140,6 +140,7 @@ button{font:inherit;color:inherit;cursor:pointer}
       <input id="prod" class="num" type="number" inputmode="decimal" min="0"><span class="unit">m³</span></div>
     <div class="field"><label for="comment">Comment</label>
       <textarea id="comment" rows="1" placeholder="optional"></textarea></div>
+    <p class="hint" id="dispInfo" style="margin:2px 0 0"></p>
   </div>
 
   <div class="box">
@@ -216,7 +217,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 15 · 7-11-2026</p>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 16 · 9-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -248,9 +249,11 @@ const store = {
   get(k) { try { return JSON.parse(localStorage.getItem(k)); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch { toast('Could not save on this phone'); } }
 };
-// The app opens on the last day something was typed for (trucks, plants, production or a comment);
-// with nothing typed yet, on yesterday (in the morning you report yesterday's work)
-const typed = r => !!r && (r.trucks != null || r.prod != null || (r.plants || []).some(Boolean) || !!(r.comment || '').trim());
+// The app opens on yesterday (in the morning you report yesterday's work), or on a later day you typed
+// something for yourself (trucks, plants, production or a comment). Numbers filled from Concrete Dispatching
+// don't count: they are there every day, today included.
+const typed = r => { if (!r) return false; const a = r.auto || {}, mine = (k, has) => has && JSON.stringify(r[k]) !== JSON.stringify(a[k]);
+  return mine('trucks', r.trucks != null) || mine('prod', r.prod != null) || mine('plants', (r.plants || []).some(Boolean)) || !!(r.comment || '').trim(); };
 function lastTypedDay() {
   const today = iso(new Date()); let best = null;
   try {
@@ -261,7 +264,8 @@ function lastTypedDay() {
   } catch {}
   return best;
 }
-let DAY = lastTypedDay() || iso(new Date(Date.now() - 864e5)), M = null, PULL = null, PICKED = false;
+const YESTERDAY = iso(new Date(Date.now() - 864e5));
+let DAY = [lastTypedDay(), YESTERDAY].filter(Boolean).sort().pop(), M = null, PULL = null, PICKED = false;
 function loadMonth(mk) {
   let m = store.get('dp-' + mk);
   if (!m) {
@@ -412,8 +416,9 @@ function render(fromPull) {
     <div class="kv"><span>MTD production</span><b class="num">${fmt(mtd(M))} m³</b></div>
     <div class="kv"><span>YTD</span><b class="num">${M.ytdBase == null ? '— set it above' : fmt(M.ytdBase + mtd(M)) + ' m³'}</b></div>`;
   $('#preview').classList.add('hidden');
+  if (typeof dispInfo === 'function') dispInfo();
 }
-function setDay(d) { DAY = d; PICKED = true; render(); }
+function setDay(d) { DAY = d; PICKED = true; render(); applyDispatch(); }
 $('#day').onchange = e => e.target.value && setDay(e.target.value);
 // some browsers only open the calendar from its small icon: open it from anywhere in the box
 $('#day').onclick = e => { try { e.target.showPicker(); } catch {} };
@@ -421,7 +426,7 @@ const shift = n => { const d = new Date(DAY + 'T00:00'); d.setDate(d.getDate() +
 $('#prevDay').onclick = () => shift(-1); $('#nextDay').onclick = () => shift(1);
 // meta = a month setting (stock, fuel, YTD, fleet) rather than the selected day
 const onNum = (id, fn, meta) => $(id).addEventListener('input', e => {
-  fn(num(e.target.value)); meta ? touchMeta() : touchDay(DAY); save(); $('#preview').classList.add('hidden');
+  fn(num(e.target.value)); meta ? touchMeta() : touchDay(DAY); save(); $('#preview').classList.add('hidden'); dispInfo();
 });
 onNum('#trucks', v => dayRec(DAY).trucks = v);
 onNum('#prod', v => dayRec(DAY).prod = v);
@@ -545,6 +550,85 @@ $('#fuelFile').onchange = async e => {
   } catch (err) { $('#fuelName').textContent = 'Could not read it'; toast(err.message); }
   e.target.value = '';
 };
+
+/* ---------- trucks, plants and production from Concrete Dispatching ----------
+   The dispatching sheet keeps one tab per plant, one row per load (Date | Truck | QM3 | Departure | Follow up …).
+   A day here runs from 8 AM to 8 AM the next morning. Working trucks = the trucks that loaded in that time,
+   plants = the ones with production, production = the loads' m³ without waste / rejected (the sheet's own rule).
+   A box is filled only while it is empty or still holds what was filled last time (rec.auto),
+   so a number you change yourself stays. */
+const DISPATCH_SHEET = '1oZfnrFmYL46zKtTH8htHyLjLYf5udq5hL-TcVdGwrIE';
+const DISPATCH_TABS = ['1986911208', '209421387', '429772700', '1305687134', '921955628'];   // L1 L2 V3 V4 V5
+const NOT_PRODUCTION = /waste|rejected\s*&?\s*transferred|مرفوض|هالك/i;
+let DISP = null;   // {at, days: {'2026-11-08': {trucks: Set, q: [L1..V5 m³]}}}
+function csvLine(line) {
+  const out = []; let cur = '', q = false;
+  for (const ch of line) { if (ch === '"') q = !q; else if (ch === ',' && !q) { out.push(cur); cur = ''; } else cur += ch; }
+  out.push(cur); return out;
+}
+function readDispatch(texts) {
+  const days = {};
+  texts.forEach((txt, k) => {
+    const rows = txt.split(/\r?\n/).map(csvLine);
+    const hr = rows.slice(0, 5).findIndex(x => x.some(c => /^departure/i.test(c.trim())));
+    if (hr < 0) throw new Error('the plant tabs changed');
+    const fi = re => rows[hr].findIndex(c => re.test(c.trim()));
+    const c = {date: fi(/^date$/i), tk: fi(/truck/i), q: fi(/qm3/i), dep: fi(/^departure/i), fu: fi(/^follow/i)};
+    if ([c.date, c.tk, c.q, c.dep].some(i => i < 0)) throw new Error('the plant tabs changed');
+    for (const x of rows.slice(hr + 1)) {
+      const tk = String(x[c.tk] || '').trim(), q = Number(String(x[c.q] || '').replace(/,/g, '')) || 0;
+      const d = String(x[c.date] || '').trim().match(/^(\d+)\/(\d+)\/(\d{4})$/);          // M/D/YYYY
+      const t = String(x[c.dep] || '').trim().match(/^(\d+):(\d+)(?::\d+)?\s*([AP])M$/i);
+      if (!d || !t || !q) continue;
+      // UTC only so the 8-hour shift never crosses a clock change
+      const at = Date.UTC(+d[3], d[1] - 1, +d[2], t[1] % 12 + (/p/i.test(t[3]) ? 12 : 0), +t[2]) - 8 * 3600e3;
+      const day = new Date(at).toISOString().slice(0, 10), o = days[day] || (days[day] = {trucks: new Set(), q: [0, 0, 0, 0, 0]});
+      if (+tk > 0) o.trucks.add(String(+tk));
+      if (!(c.fu >= 0 && NOT_PRODUCTION.test(String(x[c.fu] || '')))) o.q[k] += q;
+    }
+  });
+  return days;
+}
+async function loadDispatch(force) {
+  if (DISP && !force && Date.now() - DISP.at < 5 * 60e3) return applyDispatch();
+  if (loadDispatch.busy) return; loadDispatch.busy = true;
+  if (!DISP) $('#dispInfo').textContent = 'Getting trucks and plants from Concrete Dispatching…';
+  try {
+    const texts = await Promise.all(DISPATCH_TABS.map(async gid => {
+      const r = await fetch(`https://docs.google.com/spreadsheets/d/${DISPATCH_SHEET}/export?format=csv&gid=${gid}`, {cache: 'no-store'});
+      if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }));
+    DISP = {at: Date.now(), days: readDispatch(texts)};
+    loadDispatch.err = null;
+  } catch (err) { loadDispatch.err = err.message; }
+  loadDispatch.busy = false;
+  applyDispatch();
+}
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+function applyDispatch() {
+  if (!M) return;
+  if (DISP) {
+    const today = iso(new Date()); let changed = false;
+    for (const [d, o] of Object.entries(DISP.days)) {
+      if (monthKey(d) !== M._mk || d > today) continue;
+      const auto = {trucks: o.trucks.size, plants: o.q.map(v => v > 0), prod: Math.round(o.q.reduce((a, b) => a + b, 0) * 100) / 100};
+      const r = M.days[d] || {}, was = r.auto || {}, before = JSON.stringify(r);
+      const next = {...r, auto};
+      if (r.trucks == null || same(r.trucks, was.trucks)) next.trucks = auto.trucks;
+      if (!(r.plants || []).some(Boolean) || same(r.plants, was.plants)) next.plants = auto.plants;
+      if (r.prod == null || same(r.prod, was.prod)) next.prod = auto.prod;
+      if (JSON.stringify(next) !== before) { M.days[d] = next; touchDay(d); changed = true; }
+    }
+    if (changed) { save(); render(true); }
+  }
+  dispInfo();
+}
+function dispInfo() {
+  const r = (M && M.days[DAY]) || {}, a = r.auto;
+  if (!a) { $('#dispInfo').textContent = loadDispatch.err ? 'Could not reach Concrete Dispatching: type them' : DISP ? 'No loads in Concrete Dispatching for this day' : ''; return; }
+  const yours = ['trucks', 'plants', 'prod'].filter(k => !same(r[k], a[k])).length;
+  $('#dispInfo').textContent = `From Concrete Dispatching (8 AM → 8 AM): ${a.trucks} trucks · ${PLANTS.filter((_, i) => a.plants[i]).join(' ') || 'no plants'} · ${fmt(a.prod)} m³`
+    + (yours ? ' · your changes kept' : '');
+}
 
 /* ---------- pumps from Google Drive ---------- */
 async function loadPumps(quiet) {
@@ -1138,13 +1222,14 @@ render();
 (PULL || Promise.resolve()).then(() => {
   // days typed on another device arrive with the online copy: open on the newest one, unless a day was already picked
   const d = lastTypedDay(); if (!PICKED && d && d > DAY) { DAY = d; render(true); }
-}).then(() => loadPumps(true)).then(() => push());
+}).then(() => loadPumps(true)).then(() => loadDispatch()).then(() => push());
 // Leaving the app: send what is waiting now, before the phone puts the app to sleep.
 // Coming back: show what was saved meanwhile here or on another device.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') { clearTimeout(queue.h); push(true); return; }
   if (mergeStored()) render(true);
   if (SY) pull().then(() => push());
+  loadDispatch();
 });
 window.addEventListener('pageshow', e => { if (e.persisted && mergeStored()) render(true); });
 window.addEventListener('storage', e => { if (M && e.key === 'dp-' + M._mk && mergeStored()) render(true); });
