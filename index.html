@@ -164,7 +164,7 @@ button{font:inherit;color:inherit;cursor:pointer}
 
   <div class="box">
     <h3>🚧 Pumps <span class="st" id="pumpState">…</span></h3>
-    <p class="hint">From the Pump Quantity sheet on Google Drive, every day of the month.</p>
+    <p class="hint">From the pumps sheet on Google Drive, every day of the month.</p>
     <div class="vals" style="margin-top:0">
       <div class="v"><span>Pumped quantity · m³</span><input class="num" id="pumpQty" type="number" inputmode="decimal"></div>
       <div class="v"><span>Working pumps</span><input class="num" id="pumpCnt" type="number" inputmode="numeric"></div>
@@ -218,7 +218,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 18 · 9-11-2026</p>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 19 · 9-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -229,8 +229,9 @@ button{font:inherit;color:inherit;cursor:pointer}
 'use strict';
 const PDFJS = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
 const H2C = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
-// Pump Quantity 2026.xlsx on Google Drive (shared by link). The Sheets export address is the one a web page may read.
-const PUMP_URL = 'https://docs.google.com/spreadsheets/d/11MNcgcyM98BkZhNE4XQOoEqT9KXbOWcG/export?format=xlsx';
+// The pump quantities sheet on Google Drive (shared by link; the user's new file since 9-11-2026).
+// The Sheets export address is the one a web page may read.
+const PUMP_URL = 'https://docs.google.com/spreadsheets/d/1olcGlw2hgIZgnr06c-PNHjz-JQF0LZWd/export?format=xlsx';
 const PLANTS = ['L1', 'L2', 'V3', 'V4', 'V5'];
 // Stock in tons -> m³ that can still be produced (the sheet's "To be Produced")
 const MATERIALS = [['cement', 'Cement', 0.45], ['sand', 'Sand', 0.85], ['agg1', 'Aggregate (1)', 0.75], ['agg2', 'Aggregate (2)', 0.46]];
@@ -661,12 +662,14 @@ async function loadPumps(quiet) {
     const mk = monthKey(DAY); let days = 0;
     for (const name of wb.SheetNames) {
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[name], {header: 1, raw: true});
-      if (!(rows[1] && rows[1][0] instanceof Date) || iso(rows[1][0]).slice(0, 7) !== mk) continue;
+      // the dates are in column A on most tabs, column B on some (SEP 26): take the first date in the row
+      const dc = (rows[1] || []).findIndex(v => v instanceof Date);
+      if (dc < 0 || iso(rows[1][dc]).slice(0, 7) !== mk) continue;
       const tc = (rows[0] || []).findIndex(v => String(v ?? '').trim().toLowerCase() === 'total day');
       if (tc < 0) continue;
       for (const r of rows.slice(1)) {
-        if (!(r[0] instanceof Date)) continue;
-        const d = iso(r[0]), q = num(r[tc]), c = num(r[tc + 1]);
+        if (!(r[dc] instanceof Date)) continue;
+        const d = iso(r[dc]), q = num(r[tc]), c = num(r[tc + 1]);
         if (q) {
           const rec = dayRec(d); days++;
           // pumps come from Drive on every device, so they never make this device's copy of a day "newest":
