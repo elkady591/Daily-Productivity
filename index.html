@@ -218,7 +218,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 17 · 9-11-2026</p>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 18 · 9-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -693,9 +693,11 @@ $('#dispReload').onclick = () => loadDispatch();
 $('#impFile').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   try {
-    const wb = XLSX.read(await f.arrayBuffer(), {type: 'array', cellDates: true, cellFormula: true});
+    // sheetStubs: a file saved by Download Excel has formulas with no stored result (Excel works them out
+    // on opening), and without stubs the YTD formula in P2 would not be read at all
+    const wb = XLSX.read(await f.arrayBuffer(), {type: 'array', cellDates: true, cellFormula: true, sheetStubs: true});
     const ws = wb.Sheets['Trucks & Plants'] || wb.Sheets[wb.SheetNames[0]];
-    const v = a => ws[a] ? ws[a].v : null;
+    const v = a => ws[a] && ws[a].t !== 'z' ? ws[a].v : null;
     let n = 0, mk = null;
     for (let r = 6; r <= 36; r++) {
       const d = v('B' + r); if (!(d instanceof Date)) continue;
@@ -820,6 +822,7 @@ async function fillExcel(buf) {
   // the same comment on days in a row: written once, in the first day's cell, and the cells merged
   const runs = commentRuns(mk, daysIn(mk)).filter(([a, b]) => ![...Array(b - a + 1)].some((_, k) => hidden.has(colNum('T') + ':' + (a + k))));
   runs.forEach(([a, b]) => { for (let r = a + 1; r <= b; r++) hidden.add(colNum('T') + ':' + r); });
+  const commentRows = [];
   for (let r = FIRST_XL_ROW; r <= LAST_XL_ROW; r++) {
     const serial = num(read('B' + r)); if (!serial) continue;
     const d = iso(new Date(Date.UTC(1899, 11, 30) + serial * 864e5 + new Date().getTimezoneOffset() * 6e4));
@@ -828,6 +831,7 @@ async function fillExcel(buf) {
     put('C' + r, num(rec.trucks));
     if (rec.plants && (rec.trucks != null || rec.prod != null)) 'DEFGH'.split('').forEach((col, k) => put(col + r, !!rec.plants[k]));
     put('I' + r, num(rec.prod)); put('Q' + r, num(rec.pump)); put('R' + r, num(rec.pumps)); put('T' + r, rec.comment || null);
+    if ((rec.comment || '').trim()) commentRows.push(r);
     if (rec.trucks != null || rec.prod != null) { matched++; rowEl(r).removeAttribute('hidden'); }   // the sheet keeps days to come hidden
     if (written > before) days++;
   }
@@ -843,6 +847,30 @@ async function fillExcel(buf) {
       const mc = doc.createElementNS(NS, 'mergeCell'); mc.setAttribute('ref', `T${a}:T${b}`); mcs.appendChild(mc);
     }
     mcs.setAttribute('count', mcs.getElementsByTagNameNS(NS, 'mergeCell').length);
+  }
+  // a comment cell is highlighted yellow, as in the sheet: each comment cell (all of a merged run) gets a
+  // copy of its own style with the yellow fill, so its borders and font stay as they are
+  if (commentRows.length && styles) {
+    const fills = styles.getElementsByTagNameNS(NS, 'fills')[0], xfs = styles.getElementsByTagNameNS(NS, 'cellXfs')[0];
+    const fillList = [...fills.children], xfList = [...xfs.children];
+    let yellow = fillList.findIndex(f => { const p = f.firstElementChild, fg = p && [...p.children].find(x => x.localName === 'fgColor');
+      return p && p.getAttribute('patternType') === 'solid' && fg && /^(FF)?FFFF00$/i.test(fg.getAttribute('rgb') || ''); });
+    if (yellow < 0) {
+      const f = styles.createElementNS(NS, 'fill'), p = styles.createElementNS(NS, 'patternFill'), fg = styles.createElementNS(NS, 'fgColor'), bg = styles.createElementNS(NS, 'bgColor');
+      p.setAttribute('patternType', 'solid'); fg.setAttribute('rgb', 'FFFFFF00'); bg.setAttribute('indexed', '64');
+      p.appendChild(fg); p.appendChild(bg); f.appendChild(p); fills.appendChild(f);
+      yellow = fillList.length; fills.setAttribute('count', yellow + 1);
+    }
+    const made = {};
+    const paint = r => { const c = cellEl('T' + r), s = c.getAttribute('s') || '0';
+      if (!(s in made)) { const x = xfList[+s].cloneNode(true); x.setAttribute('fillId', yellow); x.setAttribute('applyFill', '1');
+        xfs.appendChild(x); xfList.push(x); made[s] = xfList.length - 1; xfs.setAttribute('count', xfList.length); }
+      c.setAttribute('s', made[s]); };
+    for (const r of commentRows) {
+      const run = runs.find(([a, b]) => r >= a && r <= b);
+      if (run) { for (let k = run[0]; k <= run[1]; k++) paint(k); } else paint(r);
+    }
+    sheet.zip.file('xl/styles.xml', new XMLSerializer().serializeToString(styles), {createFolders: false});
   }
   return {days, matched, blob: await packSheet(sheet)};
 }
@@ -912,7 +940,7 @@ async function newMonthExcel(buf, next, base) {
   }
   empty(cellOf('X5'));
   const p2 = cellOf('P2'), f = p2 && p2.getElementsByTagNameNS(NS, 'f')[0];
-  if (f) { f.textContent = f.textContent.replace(/^\s*[\d.]+\s*\+/, base + '+');
+  if (f && typeof base === 'number' && isFinite(base)) { f.textContent = f.textContent.replace(/^\s*[\d.]+\s*\+/, base + '+');
     const v = p2.getElementsByTagNameNS(NS, 'v')[0]; if (v) p2.removeChild(v); }
   return packSheet(sheet);
 }
