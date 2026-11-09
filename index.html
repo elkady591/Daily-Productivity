@@ -140,7 +140,8 @@ button{font:inherit;color:inherit;cursor:pointer}
       <input id="prod" class="num" type="number" inputmode="decimal" min="0"><span class="unit">m³</span></div>
     <div class="field"><label for="comment">Comment</label>
       <textarea id="comment" rows="1" placeholder="optional"></textarea></div>
-    <p class="hint" id="dispInfo" style="margin:2px 0 0"></p>
+    <button class="btn ghost" id="dispReload" style="margin-top:2px">↻ From Concrete Dispatching</button>
+    <p class="hint" id="dispInfo" style="margin:8px 0 0"></p>
   </div>
 
   <div class="box">
@@ -590,10 +591,11 @@ function readDispatch(texts) {
   });
   return days;
 }
-async function loadDispatch(force) {
-  if (DISP && !force && Date.now() - DISP.at < 5 * 60e3) return applyDispatch();
+// only on the button: the five plant tabs are about 5 MB
+async function loadDispatch() {
   if (loadDispatch.busy) return; loadDispatch.busy = true;
-  if (!DISP) $('#dispInfo').textContent = 'Getting trucks and plants from Concrete Dispatching…';
+  const btn = $('#dispReload'); btn.disabled = true; btn.textContent = '…';
+  $('#dispInfo').textContent = 'Getting trucks, plants and production from Concrete Dispatching…';
   try {
     const texts = await Promise.all(DISPATCH_TABS.map(async gid => {
       const r = await fetch(`https://docs.google.com/spreadsheets/d/${DISPATCH_SHEET}/export?format=csv&gid=${gid}`, {cache: 'no-store'});
@@ -601,8 +603,9 @@ async function loadDispatch(force) {
     DISP = {at: Date.now(), days: readDispatch(texts)};
     loadDispatch.err = null;
   } catch (err) { loadDispatch.err = err.message; }
-  loadDispatch.busy = false;
+  loadDispatch.busy = false; btn.disabled = false; btn.textContent = '↻ From Concrete Dispatching';
   applyDispatch();
+  if (loadDispatch.err) toast('Could not reach Concrete Dispatching: ' + loadDispatch.err, 3500);
 }
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function applyDispatch() {
@@ -625,8 +628,11 @@ function applyDispatch() {
 }
 function dispInfo() {
   const r = (M && M.days[DAY]) || {}, a = r.auto;
-  if (!a && DAY < iso(new Date(Date.now() - 864e5))) { $('#dispInfo').textContent = ''; return; }
-  if (!a) { $('#dispInfo').textContent = loadDispatch.err ? 'Could not reach Concrete Dispatching: type them' : DISP ? 'No loads in Concrete Dispatching for this day' : ''; return; }
+  const old = DAY < iso(new Date(Date.now() - 864e5));
+  $('#dispReload').classList.toggle('hidden', old);   // only yesterday and today are filled from it
+  if (!a && old) { $('#dispInfo').textContent = ''; return; }
+  if (!a) { $('#dispInfo').textContent = loadDispatch.err ? 'Could not reach Concrete Dispatching: type them'
+    : DISP ? 'No loads in Concrete Dispatching for this day' : 'Tap ↻ to fill trucks, plants and production from Concrete Dispatching (8 AM → 8 AM)'; return; }
   const yours = ['trucks', 'plants', 'prod'].filter(k => !same(r[k], a[k])).length;
   $('#dispInfo').textContent = `From Concrete Dispatching (8 AM → 8 AM): ${a.trucks} trucks · ${PLANTS.filter((_, i) => a.plants[i]).join(' ') || 'no plants'} · ${fmt(a.prod)} m³`
     + (yours ? ' · your changes kept' : '');
@@ -667,6 +673,7 @@ async function loadPumps(quiet) {
   }
 }
 $('#pumpReload').onclick = () => loadPumps(false);
+$('#dispReload').onclick = () => loadDispatch();
 
 /* ---------- import the month's Productivity Excel ---------- */
 $('#impFile').onchange = async e => {
@@ -1224,14 +1231,13 @@ render();
 (PULL || Promise.resolve()).then(() => {
   // days typed on another device arrive with the online copy: open on the newest one, unless a day was already picked
   const d = lastTypedDay(); if (!PICKED && d && d > DAY) { DAY = d; render(true); }
-}).then(() => loadPumps(true)).then(() => loadDispatch()).then(() => push());
+}).then(() => loadPumps(true)).then(() => push());
 // Leaving the app: send what is waiting now, before the phone puts the app to sleep.
 // Coming back: show what was saved meanwhile here or on another device.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') { clearTimeout(queue.h); push(true); return; }
   if (mergeStored()) render(true);
   if (SY) pull().then(() => push());
-  loadDispatch();
 });
 window.addEventListener('pageshow', e => { if (e.persisted && mergeStored()) render(true); });
 window.addEventListener('storage', e => { if (M && e.key === 'dp-' + M._mk && mergeStored()) render(true); });
