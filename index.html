@@ -557,8 +557,8 @@ $('#fuelFile').onchange = async e => {
    A day here runs from 8 AM to 8 AM the next morning. Working trucks = the trucks that loaded in that time,
    plants = the ones with production, production = the loads' m³ without waste / rejected (the sheet's own rule).
    Only the last day is filled: yesterday (the day you report in the morning) and today, never an older day.
-   Only an empty box is filled: anything already in a box (typed, changed, or filled before) stays.
-   rec.auto keeps what Dispatching said, for the line under the boxes. */
+   A box is filled when it is empty, or updated when it still holds what Dispatching gave last time (rec.auto).
+   Anything you typed or changed yourself stays. */
 const DISPATCH_SHEET = '1oZfnrFmYL46zKtTH8htHyLjLYf5udq5hL-TcVdGwrIE';
 const DISPATCH_TABS = ['1986911208', '209421387', '429772700', '1305687134', '921955628'];   // L1 L2 V3 V4 V5
 const NOT_PRODUCTION = /waste|rejected\s*&?\s*transferred|مرفوض|هالك/i;
@@ -615,11 +615,11 @@ function applyDispatch() {
     for (const [d, o] of Object.entries(DISP.days)) {
       if (monthKey(d) !== M._mk || d < yesterday || d > today) continue;
       const auto = {trucks: o.trucks.size, plants: o.q.map(v => v > 0), prod: Math.round(o.q.reduce((a, b) => a + b, 0) * 100) / 100};
-      const r = M.days[d] || {}, before = JSON.stringify(r);
+      const r = M.days[d] || {}, was = r.auto || {}, before = JSON.stringify(r);
       const next = {...r, auto};
-      if (r.trucks == null) next.trucks = auto.trucks;
-      if (!(r.plants || []).some(Boolean)) next.plants = auto.plants;
-      if (r.prod == null) next.prod = auto.prod;
+      if (r.trucks == null || same(r.trucks, was.trucks)) next.trucks = auto.trucks;
+      if (!(r.plants || []).some(Boolean) || same(r.plants, was.plants)) next.plants = auto.plants;
+      if (r.prod == null || same(r.prod, was.prod)) next.prod = auto.prod;
       if (JSON.stringify(next) !== before) { M.days[d] = next; touchDay(d); changed = true; }
     }
     if (changed) { save(); render(true); }
@@ -635,7 +635,7 @@ function dispInfo() {
     : DISP ? 'No loads in Concrete Dispatching for this day' : 'Tap ↻ to fill trucks, plants and production from Concrete Dispatching (8 AM → 8 AM)'; return; }
   const yours = ['trucks', 'plants', 'prod'].filter(k => !same(r[k], a[k])).length;
   $('#dispInfo').textContent = `From Concrete Dispatching (8 AM → 8 AM): ${a.trucks} trucks · ${PLANTS.filter((_, i) => a.plants[i]).join(' ') || 'no plants'} · ${fmt(a.prod)} m³`
-    + (yours ? ' · only empty boxes are filled' : '');
+    + (yours ? ' · your changes kept' : '');
 }
 
 /* ---------- pumps from Google Drive ---------- */
