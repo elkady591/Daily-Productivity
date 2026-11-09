@@ -555,6 +555,7 @@ $('#fuelFile').onchange = async e => {
    The dispatching sheet keeps one tab per plant, one row per load (Date | Truck | QM3 | Departure | Follow up …).
    A day here runs from 8 AM to 8 AM the next morning. Working trucks = the trucks that loaded in that time,
    plants = the ones with production, production = the loads' m³ without waste / rejected (the sheet's own rule).
+   Only the last day is filled: yesterday (the day you report in the morning) and today, never an older day.
    A box is filled only while it is empty or still holds what was filled last time (rec.auto),
    so a number you change yourself stays. */
 const DISPATCH_SHEET = '1oZfnrFmYL46zKtTH8htHyLjLYf5udq5hL-TcVdGwrIE';
@@ -607,9 +608,9 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function applyDispatch() {
   if (!M) return;
   if (DISP) {
-    const today = iso(new Date()); let changed = false;
+    const today = iso(new Date()), yesterday = iso(new Date(Date.now() - 864e5)); let changed = false;
     for (const [d, o] of Object.entries(DISP.days)) {
-      if (monthKey(d) !== M._mk || d > today) continue;
+      if (monthKey(d) !== M._mk || d < yesterday || d > today) continue;
       const auto = {trucks: o.trucks.size, plants: o.q.map(v => v > 0), prod: Math.round(o.q.reduce((a, b) => a + b, 0) * 100) / 100};
       const r = M.days[d] || {}, was = r.auto || {}, before = JSON.stringify(r);
       const next = {...r, auto};
@@ -624,6 +625,7 @@ function applyDispatch() {
 }
 function dispInfo() {
   const r = (M && M.days[DAY]) || {}, a = r.auto;
+  if (!a && DAY < iso(new Date(Date.now() - 864e5))) { $('#dispInfo').textContent = ''; return; }
   if (!a) { $('#dispInfo').textContent = loadDispatch.err ? 'Could not reach Concrete Dispatching: type them' : DISP ? 'No loads in Concrete Dispatching for this day' : ''; return; }
   const yours = ['trucks', 'plants', 'prod'].filter(k => !same(r[k], a[k])).length;
   $('#dispInfo').textContent = `From Concrete Dispatching (8 AM → 8 AM): ${a.trucks} trucks · ${PLANTS.filter((_, i) => a.plants[i]).join(' ') || 'no plants'} · ${fmt(a.prod)} m³`
