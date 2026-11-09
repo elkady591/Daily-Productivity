@@ -218,7 +218,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 16 · 9-11-2026</p>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 17 · 9-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -356,6 +356,9 @@ async function push(leaving) {
   push.busy = false;
   if (SY && dirty.size) { clearTimeout(queue.h); queue.h = setTimeout(push, 20000); }
 }
+const KEPT = ['trucks', 'plants', 'prod', 'comment'];
+const filled = (r, k) => k === 'plants' ? (r.plants || []).some(Boolean) : k === 'comment' ? !!(r.comment || '').trim() : r[k] != null;
+const PULLED = new Set();   // months whose online copy is in on this device
 async function pull() {
   if (!SY || !M) return;
   const mk = M._mk; syncState('busy', 'Loading…');
@@ -365,7 +368,15 @@ async function pull() {
     let changed = false;
     for (const [d, v] of Object.entries(days)) {
       const loc = M.days[d];
-      if (!loc || !loc.t || v.t > loc.t) { M.days[d] = await unseal(v.c); changed = true; }
+      if (!loc || !loc.t || v.t > loc.t) {
+        const srv = await unseal(v.c);
+        // a newer online copy that is missing boxes this device has (the old pump problem) does not wipe them:
+        // they are kept and sent back up. "Clear the selected day" marks the copy as cleared on purpose.
+        const lost = loc && !srv.cleared ? KEPT.filter(k => filled(loc, k) && !filled(srv, k)) : [];
+        lost.forEach(k => srv[k] = loc[k]);
+        if (lost.length) { srv.t = Date.now(); queue('d|' + d); }
+        M.days[d] = srv; changed = true;
+      }
     }
     if (j.meta && (!M.t || j.meta.t > M.t)) { Object.assign(M, await unseal(j.meta.c)); changed = true; }
     // what this device has and the server does not (typed before connecting) goes up
@@ -374,7 +385,7 @@ async function pull() {
     }
     const hasMeta = M.fuel != null || M.ytdBase != null || Object.keys(M.stock || {}).length;
     if (hasMeta && (!j.meta || (M.t || 0) > j.meta.t)) { M.t = M.t || Date.now(); queue('m|' + mk); }
-    save();
+    save(); PULLED.add(mk);
     if (changed) render(true);
     syncState('ok', 'Saved online');
   } catch (err) { syncFail(err); }
@@ -460,7 +471,7 @@ $('#gearBtn').onclick = openSettings;
 $('#syncBtn').onclick = openSettings;
 $('#syncSetup').onclick = openSettings;
 $('#backBtn').onclick = () => { $('#settings').classList.add('hidden'); $('#main').classList.remove('hidden'); $('#dateBar').classList.remove('hidden'); render(); };
-$('#clearDay').onclick = () => { if (confirm('Clear everything typed for ' + DAY + '?')) { M.days[DAY] = {}; touchDay(DAY); save(); render(); toast('Cleared'); } };
+$('#clearDay').onclick = () => { if (confirm('Clear everything typed for ' + DAY + '?')) { M.days[DAY] = {cleared: true}; touchDay(DAY); save(); render(); toast('Cleared'); } };
 $('#syncGo').onclick = async () => {
   const pw = $('#syncPw').value, b = $('#syncGo');
   if (pw.length < 4) return toast('At least 4 characters');
@@ -610,6 +621,8 @@ async function loadDispatch() {
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 function applyDispatch() {
   if (!M) return;
+  // with online save on, wait for the online copy first, so a day is never filled over what another device has
+  if (DISP && SY && !PULLED.has(M._mk)) { $('#dispInfo').textContent = 'Waiting for the online copy: tap ↻ again in a moment'; return; }
   if (DISP) {
     const today = iso(new Date()), yesterday = iso(new Date(Date.now() - 864e5)); let changed = false;
     for (const [d, o] of Object.entries(DISP.days)) {
@@ -656,8 +669,9 @@ async function loadPumps(quiet) {
         const d = iso(r[0]), q = num(r[tc]), c = num(r[tc + 1]);
         if (q) {
           const rec = dayRec(d); days++;
-          // only a real change counts, otherwise reloading pumps would make this device's old copy of the day "newest"
-          if (rec.pump !== q || (c && rec.pumps !== c)) { rec.pump = q; if (c) rec.pumps = c; touchDay(d); }
+          // pumps come from Drive on every device, so they never make this device's copy of a day "newest":
+          // a day holding only pumps once went online over the full day and wiped trucks / plants / production
+          rec.pump = q; if (c) rec.pumps = c;
         }
       }
       break;

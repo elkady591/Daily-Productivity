@@ -1,5 +1,5 @@
 // Bump VERSION on every change so phones pick up the new files (and the number at the bottom of ⚙ in index.html).
-const VERSION = 'daily-productivity-v16';
+const VERSION = 'daily-productivity-v17';
 const FILES = ['./', 'index.html', 'manifest.json', 'xlsx.full.min.js', 'template.xlsx', 'icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'logo.png'];
 
 self.addEventListener('install', e => {
