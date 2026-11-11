@@ -57,6 +57,14 @@ button{font:inherit;color:inherit;cursor:pointer}
 .box h3 .st{margin-left:auto;font-size:12px;font-weight:600;color:var(--muted)}
 .box h3 .st.ok{color:var(--ok)} .box h3 .st.bad{color:var(--bad)}
 .box p.hint{margin:-4px 0 10px;color:var(--muted);font-size:13px}
+/* the trucks Concrete Dispatching counted for the day: number, and how many loads it carried */
+.tks{margin-top:8px;padding:10px;border-radius:10px;background:var(--bg);border:1px solid var(--line)}
+.tks .tt{font-size:12px;color:var(--muted);margin-bottom:6px}
+.tks .tg{display:flex;flex-wrap:wrap;gap:5px}
+.tks .tk{display:inline-flex;align-items:baseline;gap:3px;padding:3px 8px;border-radius:999px;background:var(--card);
+  border:1px solid var(--line);font-weight:700;font-size:14px}
+.tks .tk small{font-size:11px;font-weight:600;color:var(--muted)}
+.tks .tk.odd{border-color:var(--accent);color:var(--accent)}
 .field{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .field label{flex:0 0 112px;font-weight:600;font-size:14px}
 .field input,.field textarea{flex:1;min-width:0;font:inherit;font-size:20px;font-weight:700;padding:7px 10px;border-radius:10px;
@@ -142,6 +150,8 @@ button{font:inherit;color:inherit;cursor:pointer}
       <textarea id="comment" rows="1" placeholder="optional"></textarea></div>
     <button class="btn ghost" id="dispReload" style="margin-top:2px">↻ From Concrete Dispatching</button>
     <p class="hint" id="dispInfo" style="margin:8px 0 0"></p>
+    <button class="btn ghost hidden" id="tksBtn" style="margin-top:8px">Show trucks</button>
+    <div id="dispTrucks" class="tks hidden"></div>
   </div>
 
   <div class="box">
@@ -218,7 +228,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 19 · 9-11-2026</p>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 20 · 11-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -574,7 +584,7 @@ $('#fuelFile').onchange = async e => {
 const DISPATCH_SHEET = '1oZfnrFmYL46zKtTH8htHyLjLYf5udq5hL-TcVdGwrIE';
 const DISPATCH_TABS = ['1986911208', '209421387', '429772700', '1305687134', '921955628'];   // L1 L2 V3 V4 V5
 const NOT_PRODUCTION = /waste|rejected\s*&?\s*transferred|مرفوض|هالك/i;
-let DISP = null;   // {at, days: {'2026-11-08': {trucks: Set, q: [L1..V5 m³]}}}
+let DISP = null;   // {at, days: {'2026-11-08': {trucks: Map(truck → loads), q: [L1..V5 m³]}}}
 function csvLine(line) {
   const out = []; let cur = '', q = false;
   for (const ch of line) { if (ch === '"') q = !q; else if (ch === ',' && !q) { out.push(cur); cur = ''; } else cur += ch; }
@@ -596,8 +606,8 @@ function readDispatch(texts) {
       if (!d || !t || !q) continue;
       // UTC only so the 8-hour shift never crosses a clock change
       const at = Date.UTC(+d[3], d[1] - 1, +d[2], t[1] % 12 + (/p/i.test(t[3]) ? 12 : 0), +t[2]) - 8 * 3600e3;
-      const day = new Date(at).toISOString().slice(0, 10), o = days[day] || (days[day] = {trucks: new Set(), q: [0, 0, 0, 0, 0]});
-      if (+tk > 0) o.trucks.add(String(+tk));
+      const day = new Date(at).toISOString().slice(0, 10), o = days[day] || (days[day] = {trucks: new Map(), q: [0, 0, 0, 0, 0]});
+      if (+tk > 0) o.trucks.set(String(+tk), (o.trucks.get(String(+tk)) || 0) + 1);
       if (!(c.fu >= 0 && NOT_PRODUCTION.test(String(x[c.fu] || '')))) o.q[k] += q;
     }
   });
@@ -628,7 +638,8 @@ function applyDispatch() {
     const today = iso(new Date()), yesterday = iso(new Date(Date.now() - 864e5)); let changed = false;
     for (const [d, o] of Object.entries(DISP.days)) {
       if (monthKey(d) !== M._mk || d < yesterday || d > today) continue;
-      const auto = {trucks: o.trucks.size, plants: o.q.map(v => v > 0), prod: Math.round(o.q.reduce((a, b) => a + b, 0) * 100) / 100};
+      const auto = {trucks: o.trucks.size, plants: o.q.map(v => v > 0), prod: Math.round(o.q.reduce((a, b) => a + b, 0) * 100) / 100,
+        list: [...o.trucks].sort((a, b) => a[0] - b[0])};   // [[truck, loads], …] to show which trucks were counted
       const r = M.days[d] || {}, was = r.auto || {}, before = JSON.stringify(r);
       const next = {...r, auto};
       if (r.trucks == null || same(r.trucks, was.trucks)) next.trucks = auto.trucks;
@@ -644,12 +655,30 @@ function dispInfo() {
   const r = (M && M.days[DAY]) || {}, a = r.auto;
   const old = DAY < iso(new Date(Date.now() - 864e5));
   $('#dispReload').classList.toggle('hidden', old);   // only yesterday and today are filled from it
+  if (!a || !a.list) dispTrucks(null);
   if (!a && old) { $('#dispInfo').textContent = ''; return; }
   if (!a) { $('#dispInfo').textContent = loadDispatch.err ? 'Could not reach Concrete Dispatching: type them'
     : DISP ? 'No loads in Concrete Dispatching for this day' : 'Tap ↻ to fill trucks, plants and production from Concrete Dispatching (8 AM → 8 AM)'; return; }
   const yours = ['trucks', 'plants', 'prod'].filter(k => !same(r[k], a[k])).length;
   $('#dispInfo').textContent = `From Concrete Dispatching (8 AM → 8 AM): ${a.trucks} trucks · ${PLANTS.filter((_, i) => a.plants[i]).join(' ') || 'no plants'} · ${fmt(a.prod)} m³`
     + (yours ? ' · your changes kept' : '');
+  dispTrucks(a.list);
+}
+// the counted trucks, each with its loads; a number far from the fleet's (e.g. 188 among 101–133) is
+// highlighted, as it may be a hired truck or a typing slip in the dispatching sheet
+// the list stays hidden until "Show trucks" is tapped, and hides again when the day changes or the app opens
+let TKS_OPEN = false, TKS_DAY = null;
+function dispTrucks(list) {
+  const box = $('#dispTrucks'), btn = $('#tksBtn');
+  if (TKS_DAY !== DAY) { TKS_OPEN = false; TKS_DAY = DAY; }
+  btn.classList.toggle('hidden', !list || !list.length);
+  btn.textContent = TKS_OPEN ? 'Hide trucks' : 'Show trucks';
+  if (!list || !list.length || !TKS_OPEN) { box.classList.add('hidden'); return; }
+  const nums = list.map(([t]) => +t).sort((a, b) => a - b), mid = nums[Math.floor(nums.length / 2)];
+  const loads = list.reduce((s, [, n]) => s + n, 0);
+  box.innerHTML = `<div class="tt">${list.length} trucks · ${loads} loads (the small number = loads)</div><div class="tg">`
+    + list.map(([t, n]) => `<span class="tk${Math.abs(+t - mid) > 40 ? ' odd' : ''}">${t}<small>×${n}</small></span>`).join('') + '</div>';
+  box.classList.remove('hidden');
 }
 
 /* ---------- pumps from Google Drive ---------- */
@@ -691,6 +720,7 @@ async function loadPumps(quiet) {
 }
 $('#pumpReload').onclick = () => loadPumps(false);
 $('#dispReload').onclick = () => loadDispatch();
+$('#tksBtn').onclick = () => { TKS_OPEN = !TKS_OPEN; dispInfo(); };
 
 /* ---------- import the month's Productivity Excel ---------- */
 $('#impFile').onchange = async e => {
