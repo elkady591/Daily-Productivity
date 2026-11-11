@@ -65,6 +65,8 @@ button{font:inherit;color:inherit;cursor:pointer}
   border:1px solid var(--line);font-weight:700;font-size:14px}
 .tks .tk small{font-size:11px;font-weight:600;color:var(--muted)}
 .tks .tk.odd{border-color:var(--accent);color:var(--accent)}
+.tks .oth{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;margin-top:6px}
+.tks .ow{font-size:13px;color:var(--muted)}.tks .ow b{color:var(--accent)}
 .field{display:flex;align-items:center;gap:8px;margin-bottom:10px}
 .field label{flex:0 0 112px;font-weight:600;font-size:14px}
 .field input,.field textarea{flex:1;min-width:0;font:inherit;font-size:20px;font-weight:700;padding:7px 10px;border-radius:10px;
@@ -228,7 +230,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 20 · 11-11-2026</p>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 21 · 11-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -584,13 +586,26 @@ $('#fuelFile').onchange = async e => {
 const DISPATCH_SHEET = '1oZfnrFmYL46zKtTH8htHyLjLYf5udq5hL-TcVdGwrIE';
 const DISPATCH_TABS = ['1986911208', '209421387', '429772700', '1305687134', '921955628'];   // L1 L2 V3 V4 V5
 const NOT_PRODUCTION = /waste|rejected\s*&?\s*transferred|مرفوض|هالك/i;
-let DISP = null;   // {at, days: {'2026-11-08': {trucks: Map(truck → loads), q: [L1..V5 m³]}}}
+// "Trucks Tracking" tab: its "Available Trucks" column is the list of our own mixers (101, 102 … 134).
+// Only these count as working trucks; any other number (e.g. 188) is shown apart and not counted.
+const FLEET_TAB = '1257690697';
+let DISP = null;   // {at, days: {'2026-11-08': {trucks: Map(truck → loads), other: Map, q: [L1..V5 m³]}}}
+function readFleet(txt) {
+  const rows = txt.split(/\r?\n/).map(csvLine); let best = [];
+  rows.forEach((row, r) => row.forEach((cell, c) => {
+    if (!/^available\s*trucks$/i.test(cell.trim())) return;
+    const run = [];
+    for (let i = r + 1; i < rows.length && /^\d+$/.test(String(rows[i][c] || '').trim()); i++) run.push(String(+rows[i][c]));
+    if (run.length > best.length) best = run;
+  }));
+  return best.length >= 5 ? new Set(best) : null;     // null = list not found: count every truck as before
+}
 function csvLine(line) {
   const out = []; let cur = '', q = false;
   for (const ch of line) { if (ch === '"') q = !q; else if (ch === ',' && !q) { out.push(cur); cur = ''; } else cur += ch; }
   out.push(cur); return out;
 }
-function readDispatch(texts) {
+function readDispatch(texts, fleet) {
   const days = {};
   texts.forEach((txt, k) => {
     const rows = txt.split(/\r?\n/).map(csvLine);
@@ -599,15 +614,23 @@ function readDispatch(texts) {
     const fi = re => rows[hr].findIndex(c => re.test(c.trim()));
     const c = {date: fi(/^date$/i), tk: fi(/truck/i), q: fi(/qm3/i), dep: fi(/^departure/i), fu: fi(/^follow/i)};
     if ([c.date, c.tk, c.q, c.dep].some(i => i < 0)) throw new Error('the plant tabs changed');
-    for (const x of rows.slice(hr + 1)) {
+    for (let ri = hr + 1; ri < rows.length; ri++) {
+      const x = rows[ri];
       const tk = String(x[c.tk] || '').trim(), q = Number(String(x[c.q] || '').replace(/,/g, '')) || 0;
       const d = String(x[c.date] || '').trim().match(/^(\d+)\/(\d+)\/(\d{4})$/);          // M/D/YYYY
       const t = String(x[c.dep] || '').trim().match(/^(\d+):(\d+)(?::\d+)?\s*([AP])M$/i);
       if (!d || !t || !q) continue;
       // UTC only so the 8-hour shift never crosses a clock change
       const at = Date.UTC(+d[3], d[1] - 1, +d[2], t[1] % 12 + (/p/i.test(t[3]) ? 12 : 0), +t[2]) - 8 * 3600e3;
-      const day = new Date(at).toISOString().slice(0, 10), o = days[day] || (days[day] = {trucks: new Map(), q: [0, 0, 0, 0, 0]});
-      if (+tk > 0) o.trucks.set(String(+tk), (o.trucks.get(String(+tk)) || 0) + 1);
+      const day = new Date(at).toISOString().slice(0, 10), o = days[day] || (days[day] = {trucks: new Map(), other: new Map(), q: [0, 0, 0, 0, 0]});
+      if (+tk > 0) {
+        const id = String(+tk);
+        if (!fleet || fleet.has(id)) o.trucks.set(id, (o.trucks.get(id) || 0) + 1);
+        else {   // not our mixer: keep where and when it loaded, so it can be found in the sheet
+          const l = o.other.get(id) || []; o.other.set(id, l);
+          l.push({p: PLANTS[k], d: `${String(d[2]).padStart(2, '0')}-${String(d[1]).padStart(2, '0')}`, t: String(x[c.dep]).trim(), q, row: ri + 1});
+        }
+      }
       if (!(c.fu >= 0 && NOT_PRODUCTION.test(String(x[c.fu] || '')))) o.q[k] += q;
     }
   });
@@ -619,10 +642,11 @@ async function loadDispatch() {
   const btn = $('#dispReload'); btn.disabled = true; btn.textContent = '…';
   $('#dispInfo').textContent = 'Getting trucks, plants and production from Concrete Dispatching…';
   try {
-    const texts = await Promise.all(DISPATCH_TABS.map(async gid => {
-      const r = await fetch(`https://docs.google.com/spreadsheets/d/${DISPATCH_SHEET}/export?format=csv&gid=${gid}`, {cache: 'no-store'});
-      if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); }));
-    DISP = {at: Date.now(), days: readDispatch(texts)};
+    const get = async (gid, range = '') => {
+      const r = await fetch(`https://docs.google.com/spreadsheets/d/${DISPATCH_SHEET}/export?format=csv&gid=${gid}${range}`, {cache: 'no-store'});
+      if (!r.ok) throw new Error('HTTP ' + r.status); return r.text(); };
+    const [fleetTxt, ...texts] = await Promise.all([get(FLEET_TAB, '&range=A1:AU120').catch(() => ''), ...DISPATCH_TABS.map(g => get(g))]);
+    DISP = {at: Date.now(), days: readDispatch(texts, readFleet(fleetTxt))};
     loadDispatch.err = null;
   } catch (err) { loadDispatch.err = err.message; }
   loadDispatch.busy = false; btn.disabled = false; btn.textContent = '↻ From Concrete Dispatching';
@@ -639,7 +663,8 @@ function applyDispatch() {
     for (const [d, o] of Object.entries(DISP.days)) {
       if (monthKey(d) !== M._mk || d < yesterday || d > today) continue;
       const auto = {trucks: o.trucks.size, plants: o.q.map(v => v > 0), prod: Math.round(o.q.reduce((a, b) => a + b, 0) * 100) / 100,
-        list: [...o.trucks].sort((a, b) => a[0] - b[0])};   // [[truck, loads], …] to show which trucks were counted
+        list: [...o.trucks].sort((a, b) => a[0] - b[0]),    // [[truck, loads], …] to show which trucks were counted
+        other: [...o.other].sort((a, b) => a[0] - b[0])};   // numbers not in our mixer list: shown, never counted
       const r = M.days[d] || {}, was = r.auto || {}, before = JSON.stringify(r);
       const next = {...r, auto};
       if (r.trucks == null || same(r.trucks, was.trucks)) next.trucks = auto.trucks;
@@ -662,22 +687,25 @@ function dispInfo() {
   const yours = ['trucks', 'plants', 'prod'].filter(k => !same(r[k], a[k])).length;
   $('#dispInfo').textContent = `From Concrete Dispatching (8 AM → 8 AM): ${a.trucks} trucks · ${PLANTS.filter((_, i) => a.plants[i]).join(' ') || 'no plants'} · ${fmt(a.prod)} m³`
     + (yours ? ' · your changes kept' : '');
-  dispTrucks(a.list);
+  dispTrucks(a.list, a.other);
 }
-// the counted trucks, each with its loads; a number far from the fleet's (e.g. 188 among 101–133) is
-// highlighted, as it may be a hired truck or a typing slip in the dispatching sheet
+// the counted trucks, each with its loads; numbers that are not our mixers (e.g. 188) are listed apart, not counted
 // the list stays hidden until "Show trucks" is tapped, and hides again when the day changes or the app opens
 let TKS_OPEN = false, TKS_DAY = null;
-function dispTrucks(list) {
+function dispTrucks(list, other = []) {
   const box = $('#dispTrucks'), btn = $('#tksBtn');
   if (TKS_DAY !== DAY) { TKS_OPEN = false; TKS_DAY = DAY; }
-  btn.classList.toggle('hidden', !list || !list.length);
+  const any = list && (list.length || other.length);
+  btn.classList.toggle('hidden', !any);
   btn.textContent = TKS_OPEN ? 'Hide trucks' : 'Show trucks';
-  if (!list || !list.length || !TKS_OPEN) { box.classList.add('hidden'); return; }
-  const nums = list.map(([t]) => +t).sort((a, b) => a - b), mid = nums[Math.floor(nums.length / 2)];
+  if (!any || !TKS_OPEN) { box.classList.add('hidden'); return; }
   const loads = list.reduce((s, [, n]) => s + n, 0);
+  // each load of a truck that is not ours: plant, date, departure time, m³ and the row in that plant's tab
+  const where = l => Array.isArray(l) ? l.map(v => `<div class="ow"><b>${v.p}</b> · ${v.d} · ${v.t} · ${fmt(v.q)} m³ · row ${v.row}</div>`).join('') : '';
   box.innerHTML = `<div class="tt">${list.length} trucks · ${loads} loads (the small number = loads)</div><div class="tg">`
-    + list.map(([t, n]) => `<span class="tk${Math.abs(+t - mid) > 40 ? ' odd' : ''}">${t}<small>×${n}</small></span>`).join('') + '</div>';
+    + list.map(([t, n]) => `<span class="tk">${t}<small>×${n}</small></span>`).join('') + '</div>'
+    + (other.length ? `<div class="tt" style="margin-top:8px">Not our mixers, not counted:</div>`
+      + other.map(([t, l]) => `<div class="oth"><span class="tk odd">${t}<small>×${Array.isArray(l) ? l.length : l}</small></span>${where(l)}</div>`).join('') : '');
   box.classList.remove('hidden');
 }
 
