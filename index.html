@@ -230,7 +230,7 @@ button{font:inherit;color:inherit;cursor:pointer}
     <div id="savedInfo"></div>
     <button class="btn ghost" id="clearDay" style="margin-top:8px">Clear the selected day</button>
   </div>
-  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 21 · 11-11-2026</p>
+  <p style="text-align:center;margin:14px 0 0;color:var(--muted);font-size:13px">Version 22 · 13-11-2026</p>
 </div>
 
 <div id="report"></div>
@@ -1095,7 +1095,8 @@ async function sheetLook() {
   const fonts = kids(sec('fonts')).map(font);
   const fills = kids(sec('fills')).map(f => { const p = f.firstElementChild; return p && p.getAttribute('patternType') === 'solid' ? color(kid(p, 'fgColor')) : null; });
   const edge = (b, n) => { const e = kid(b, n), s = e && e.getAttribute('style'); if (!s) return null;
-    return {w: s === 'thick' ? 3 : /^medium/.test(s) ? 2 : 1, dash: /[Dd]ash|[Dd]ot/.test(s) ? 'dashed' : 'solid', c: color(kid(e, 'color')) || '#000'}; };
+    // "double" is only on the YTD Production box: drawn bold
+    return {w: s === 'thick' || s === 'double' ? 3 : /^medium/.test(s) ? 2 : 1, dash: /[Dd]ash|[Dd]ot/.test(s) ? 'dashed' : 'solid', c: color(kid(e, 'color')) || '#000'}; };
   const borders = kids(sec('borders')).map(b => ({left: edge(b, 'left'), right: edge(b, 'right'), top: edge(b, 'top'), bottom: edge(b, 'bottom')}));
   const codes = {1: '0', 2: '0.00', 3: '#,##0', 4: '#,##0.00', 9: '0%', 10: '0.00%', 14: 'd-mmm'};
   all(st, 'numFmt').forEach(n => codes[n.getAttribute('numFmtId')] = n.getAttribute('formatCode'));
