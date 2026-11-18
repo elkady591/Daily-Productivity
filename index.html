@@ -1285,15 +1285,17 @@ async function buildReport() {
   for (const el of $('#report').querySelectorAll('[data-fit]')) {
     const t = el.firstElementChild; t.style.overflowWrap = 'anywhere';
     let fs = parseFloat(el.style.fontSize);
-    while (fs > 6 && (t.offsetHeight > el.clientHeight - 2 || t.offsetWidth > el.clientWidth - 8)) el.style.fontSize = (fs -= 0.5) + 'px';
+    // a little room to spare: the picture is drawn by another engine that can set the text a bit wider
+    while (fs > 6 && (t.offsetHeight > el.clientHeight - 2 || t.offsetWidth > (el.clientWidth - 8) * 0.95)) el.style.fontSize = (fs -= 0.5) + 'px';
   }
 }
 async function reportBlob() {
   if (!window.html2canvas) await loadScript(H2C);
-  await buildReport();
-  // the sheet's fonts must be ready before the picture is taken
+  // the sheet's fonts must be ready before the report is laid out (long comments are measured to fit) and drawn
   await Promise.all(['400 16px "ADLaM Display"', '400 16px Carlito', '700 16px Carlito', '400 16px "Archivo Black"', '600 16px Barlow']
     .map(f => document.fonts.load(f).catch(() => null)));
+  await buildReport();
+  await document.fonts.ready;
   await Promise.all([...$('#report').querySelectorAll('img')].map(i => i.complete ? 0 : new Promise(r => { i.onload = i.onerror = r; })));
   // twice the sheet's own size, so the small text stays sharp after WhatsApp shrinks the picture
   const canvas = await html2canvas($('#report'), {scale: 2, backgroundColor: '#ffffff', logging: false});
